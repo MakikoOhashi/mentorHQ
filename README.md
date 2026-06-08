@@ -1,286 +1,109 @@
 # MentorHQ
-## 概要
-
-MentorHQ は、学習者を直接指導するAIではありません。
-MentorHQ は、
-
-**コーチの意思決定を支援するマルチエージェントシステム**
-
-です。
-学習者と対話するのは常にコーチです。
-各AIエージェントは、学習者の状態や過去の履歴を分析し、コーチへ助言や観察結果を提供します。
-コーチはそれらを統合し、学習者に対して最適な介入を行います。
-
----
-
-## 解決したい課題
-多くの学習サービスは、
-- 正解
-- 不正解
-- 解説
-で終了します。
-しかし実際の学習では、
-- なぜその選択肢を選んだのか
-- どの条件を見落としたのか
-- どのような誤解をしているのか
-- なぜ同じミスを繰り返すのか
-を理解することが重要です。
-MentorHQ は、
-**答えではなく思考過程を対象とする**
-ことを目指しています。
----
-## コアコンセプト
-従来の学習フロー
-```text
-問題
-↓
-回答
-↓
-正解発表
-↓
-解説
-```
 
-MentorHQ の学習フロー
-```text
-問題
-↓
-回答
-↓
-なぜそう考えた？
-↓
-どこを根拠にした？
-↓
-誤解パターン分析
-↓
-コーチによる介入
-↓
-再考
-↓
-再回答
-```
-MentorHQ は解説生成システムではなく、
+## Overview
 
-介入支援システム
+MentorHQ is a coach-centered multi-agent system where specialized AI agents support a single coach’s decisions before the coach responds to the learner.
 
-です。
-
----
-基本思想
-
-MentorHQ の中心は「コーチ」です。
-
-AIエージェントは学習者へ直接指導を行いません。
-
-Learner
-   ↓
- Coach
-   ↑
- Agents
-
-エージェントは観察・分析・提案を行い、
-
-最終判断はコーチが担当します。
-
-
----
-アーキテクチャ
-
-                 Memory Agent
-                        ↑
-Milestone Agent ← Coach → Misconception Agent
-                        ↓
-                    Learner
-                        ↑
-                  Health Agent
-
----
-
-初期エージェント構成
-
-Memory Agent
-
-過去の学習履歴を分析する。
-
-例
-
-* 同じ誤答を繰り返していないか
-* 過去に同様の論点で失点していないか
-* 学習パターンに変化がないか
-
----
-
-Misconception Agent
-
-誤解や認知エラーを分析する。
-
-例
-
-* 起算点誤認
-* 条件見落とし
-* 主語誤認
-* 例外規定見落とし
-* 比較不足
-
-など。
-
----
-
-Milestone Agent
-
-目標までの進捗を分析する。
-
-例
-
-* 試験日まで残り日数
-* 学習進捗率
-* 弱点領域の消化状況
-* 学習計画との差分
-
----
-
-Health Agent
-
-学習継続可能性を分析する。
-
-例
-
-* 睡眠不足
-* 学習負荷過多
-* 疲労蓄積
-* 継続リスク
-
----
-
-エージェントの責務
-
-MentorHQ において、
-
-エージェントは「答え」を出しません。
-
-代わりに、
-
-Finding
-Risk
-Recommendation
-
-をコーチへ提供します。
-
-例
-
-Finding:
-起算点誤認の可能性が高い
-Risk:
-同様のミスが3回目
-Recommendation:
-解説せず、
-まず起算点を本人に言語化させる
-
----
-
-コーチの役割
-
-コーチは複数エージェントからの情報を統合し、
-
-学習者へ介入します。
-
-例
-
-学習者
-
-相続放棄は3ヶ月以内だから正しいと思った
-
-Misconception Agent
-
-起算点誤認の可能性
-
-Memory Agent
-
-同種ミス3回目
-
-Coach
-
-その3ヶ月は
-いつから数えると思いましたか？
-
----
-
-MVP
-
-ハッカソン向け初期版では以下を実装対象とします。
-
-学習フロー
-
-四択問題
-↓
-回答
-↓
-回答理由入力
-↓
-誤解分析
-↓
-再考質問生成
-↓
-再回答
-
-エージェント
-
-* Memory Agent
-* Misconception Agent
-* Milestone Agent
-* Health Agent
-
-UI
-
-左カラム
-
-Learner ↔ Coach
-
-右カラム
-
-Agent Reports
-
-コーチがどのような判断材料を受け取り、
-どのように介入したかを可視化する。
-
----
-
-将来構想
-
-追加候補
-
-* Motivation Agent
-* Schedule Agent
-* Exam Strategy Agent
-* Research Agent
-
-将来的には、
-
-資格試験だけでなく、
-
-* 語学学習
-* キャリア支援
-* 営業トレーニング
-* 面接対策
-
-などへ展開可能な
-
-「コーチ支援OS」
-
-を目指す。
-
----
-
-## MentorHQとは
-
-MentorHQ は、
-
-AIが学習者を直接指導するシステムではない。
-
-AIがコーチを支援し、
-
-コーチが学習者を導くための
-
-Coach-Centered Multi-Agent System
-
-である。
+MentorHQ は AI Tutor ではなく、Coach Decision OS です。
+学習者を直接支援するのではなく、Coach の判断を支援することを主目的にしています。
+
+## Core Concept
+
+- 学習者に直接話しかける主役は常に Coach
+- Agent は learner-facing ではなく coach-facing
+- Agent は教えるのではなく、観察・分析・推薦を行う
+- 最後に学習者へ介入するのは Coach
+
+## Two-column UI
+
+### Left Column
+
+- Question
+- Learner answer
+- Reflection input
+- Coach response
+- Final integrated question
+
+### Right Column
+
+- Agent reports
+- Confidence
+- Evidence
+- Recommendation
+- Final coach decision trace
+
+## Question Flow
+
+MentorHQ の出題フローは、いきなり一問を丸ごと解かせるのではなく、思考過程を観測するために分解して扱います。
+
+1. Select past exam question
+2. Break question into individual choices/legs
+3. Ask learner to judge each leg as true / false / unsure
+4. Ask short reason only when useful
+5. Store learner belief separately from objective truth
+6. Run Misconception Agent and Memory Agent
+7. Coach gives targeted intervention
+8. Repeat for relevant choices
+9. Show original integrated multiple-choice question
+10. Ask final answer
+11. Compare local leg-level understanding with final integrated performance
+12. Store outcome
+
+## Agent Catalog
+
+- Memory Agent
+- Misconception Agent
+- Milestone Agent
+- Health Agent
+- Load Agent
+
+各 Agent は答えを返すのではなく、Coach に以下を渡します。
+
+- Finding
+- Risk
+- Recommendation
+- Confidence
+- Evidence
+
+## MVP Scope
+
+### In Scope
+
+- 左右 2 カラム UI
+- 過去問 1 問
+- 脚ごとの ○× 判断
+- 短い理由入力
+- Agent Reports
+- Coach Decision
+- Final integrated question
+- Decision trace
+- Local JSON memory or simple storage
+
+### Out of Scope
+
+- 完全な問題 DB
+- ログイン
+- 課金
+- 本格 Firestore
+- OpenMetadata
+- 会社全体の経営シミュレーション
+- Marketing Agent
+- Back Office Agent
+- 汎用資格対応
+
+## Hackathon Target
+
+- DevOps x AI Agent Hackathon
+- Google Cloud Run + Gemini API planned
+- 題材は管理業務主任者試験
+
+## Design Docs
+
+- `docs/00_VISION.md`
+- `docs/01_AGENT_ARCHITECTURE.md`
+- `docs/02_AGENT_CATALOG.md`
+- `docs/03_COACH_DECISION_FLOW.md`
+- `docs/04_QUESTION_FLOW.md`
+- `docs/05_DATA_MODEL.md`
+- `docs/06_MVP_SCOPE.md`
+- `docs/07_IMPLEMENTATION_PLAN.md`
