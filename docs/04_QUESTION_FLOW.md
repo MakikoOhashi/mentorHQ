@@ -6,20 +6,25 @@
 
 ただし目的は簡単化ではなく、学習者の思考過程を観測し、Coach が適切な介入を決められるようにすることにある。
 
+MentorHQ の Question Flow は固定手順ではなく、Coach が選ぶ intervention strategy の集合である。
+
+MVP では `leg_breakdown` を default observation strategy として使うが、これは UI 都合ではなく、学習者の belief を観測するための Coach decision である。
+
 ## Primary Flow
 
 1. Select past exam question
-2. Break question into individual choices/legs
-3. Ask learner to judge each leg as true / false / unsure
-4. Ask short reason only when useful
-5. Store learner belief separately from objective truth
-6. Run Misconception Agent and Memory Agent
-7. Coach gives targeted intervention
-8. Repeat for relevant choices
-9. Show original integrated multiple-choice question
-10. Ask final answer
-11. Compare local leg-level understanding with final integrated performance
-12. Store outcome
+2. Coach selects an intervention_type based on current context
+3. Default MVP strategy is leg_breakdown
+4. Ask learner to judge each selected leg as true / false / unsure
+5. Ask short reason only when useful
+6. Store learner belief separately from objective truth
+7. Run relevant Agents
+8. Coach selects next intervention
+9. Repeat only if the next observation is useful
+10. Show original integrated multiple-choice question when ready
+11. Ask final answer
+12. Compare local leg-level understanding with final integrated performance
+13. Store outcome
 
 ## Key Concepts
 
@@ -47,12 +52,50 @@
 
 脚ごとの判断は、問題を簡単にするためではない。
 
+また、常に使うものでもない。
+
+`leg_breakdown` は、Coach が belief / objective truth のズレを観測したいときに選ぶ intervention strategy である。
+
 目的は以下である。
 
 - どの条件で誤解したかを観測する
 - unsure と誤信を区別する
 - explanation 前に reasoning signal を取る
 - 最後に本問へ戻したときの統合力を確認する
+
+## Intervention Types
+
+### leg_breakdown
+
+脚・選択肢ごとの判断を取る。
+
+- purpose: belief と objective truth のズレを見える化する
+- when to use: どの脚で誤信・迷い・条件見落としが起きているかを観測したいとき
+- stored signal: leg judgment, learner belief, optional short reason, leg-level confidence
+
+### contrast_check
+
+似た条件や選択肢を比較させる。
+
+- purpose: 比較不足や例外見落としを観測する
+- when to use: 似た選択肢の取り違えや条件差の無視が疑われるとき
+- stored signal: contrasted items, comparison rationale, detected confusion pattern
+
+### starting_point_check
+
+起算点・条件・主語・例外など1つの焦点を言語化させる。
+
+- purpose: explanation 前に、特定焦点を本人が言語化できるかを観測する
+- when to use: 起算点誤認、条件抜け、主語取り違えなど単一焦点の確認が必要なとき
+- stored signal: intervention target, learner wording, observation result
+
+### integrated_retry
+
+最後に本来の一問として再回答させる。
+
+- purpose: 局所理解が統合問題でも維持されるかを確認する
+- when to use: 局所観測や focused check の後に、全体として解けるかを確かめたいとき
+- stored signal: final integrated answer, transfer result, local-vs-integrated gap
 
 ## Intervention Timing
 
@@ -71,59 +114,70 @@
 
 - 管理業務主任者試験の過去問から 1 問選ぶ
 
-### 2. Break question into individual choices/legs
+### 2. Coach selects an intervention_type based on current context
 
-- choice を観測可能な単位に分解する
+- agent report
+- learner belief
+- prior pattern
+- current load
 
-### 3. Ask learner to judge each leg
+を見て、最初の観測方法を決める。
+
+### 3. Default MVP strategy is leg_breakdown
+
+- MVP では `leg_breakdown` を最初の観測に使う
+- ただし固定 UI ではなく Coach decision として扱う
+
+### 4. Ask learner to judge each selected leg
 
 - true
 - false
 - unsure
 
-### 4. Ask short reason only when useful
+### 5. Ask short reason only when useful
 
 - 長文 essay は不要
 - 1〜2 文の reflection で十分
 
-### 5. Store learner belief separately from objective truth
+### 6. Store learner belief separately from objective truth
 
 ここが誤解分析の核になる。
 
 - objective truth = 実際の正誤
 - learner belief = 学習者の判断
 
-### 6. Run Misconception Agent and Memory Agent
+### 7. Run relevant Agents
 
 - 誤解タイプの仮説生成
 - 類似ケースとの比較
+- 必要に応じて負荷や優先度も参照する
 
-### 7. Coach gives targeted intervention
+### 8. Coach selects next intervention
 
 - 解説ではなく確認質問を優先
 - 1 つの論点に絞る
 
-### 8. Repeat for relevant choices
+### 9. Repeat only if the next observation is useful
 
 - 全 choices を必ず深掘りする必要はない
-- 観測価値が高い脚を優先する
+- 次の観測で新しい signal が得られるときだけ進む
 
-### 9. Show original integrated multiple-choice question
+### 10. Show original integrated multiple-choice question when ready
 
 - 局所理解を本問へ戻す
 
-### 10. Ask final answer
+### 11. Ask final answer
 
 - 最後に通常の一問として解かせる
 
-### 11. Compare local vs integrated performance
+### 12. Compare local vs integrated performance
 
 - 脚では理解できたが統合で崩れる
 - 脚では迷ったが最終で回復した
 
 などの差を見る。
 
-### 12. Store outcome
+### 13. Store outcome
 
 - answer outcome
 - misconception hypothesis
@@ -135,15 +189,15 @@
 ```text
 Original question
 ↓
-Choice 1 review
+Coach selects leg_breakdown
 ↓
-Choice 2 review
+Leg judgments
 ↓
-Choice 3 review with reflection
+Agent reports
 ↓
-Coach intervention
+Coach selects starting_point_check
 ↓
-Original question again
+Original question again via integrated_retry
 ↓
 Final answer
 ↓

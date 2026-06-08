@@ -2,7 +2,12 @@
 
 ## Decision Flow
 
-MentorHQ では、1 つの choice / leg に対して以下の順序で意思決定する。
+MentorHQ では、Coach が current context と Agent Reports を見て、その時点で最も有効な intervention strategy を 1 つ選ぶ。
+
+脚分解は MentorHQ の default observation strategy だが、hardcoded product flow ではない。
+Coach が Agent Reports を見て選択する `intervention_type` の一つとして扱う。
+
+1 つの choice / leg に対しては、以下の順序で意思決定する。
 
 1. Learner answers one choice/leg
 2. Coach receives answer
@@ -76,13 +81,22 @@ Coach は次を見比べる。
 
 ### 6. Coach selects one intervention
 
-選択肢の例:
+Coach は observation goal に応じて `intervention_type` を選ぶ。
 
-- check question
-- contrast question
-- ask-for-starting-point
-- ask-for-condition
-- defer-and-review-later
+代表的な選択肢:
+
+- `leg_breakdown`
+  - 選択肢・脚ごとに true / false / unsure を確認する
+  - belief と objective truth のズレを観測するために使う
+- `contrast_check`
+  - 似た選択肢や似た条件を比較させる
+  - 比較不足・例外見落としを観測するために使う
+- `starting_point_check`
+  - 起算点・条件・主語・例外など、1つの焦点だけ確認する
+  - 説明せずに本人へ言語化させるために使う
+- `integrated_retry`
+  - 本来の一問として再回答させる
+  - 局所理解が統合問題で維持されるか確認するために使う
 
 ### 7. Coach responds to learner
 
@@ -124,7 +138,7 @@ Learner chooses “3 is true because it says within 3 months.”
 
 ### Coach Decision
 
-解説せず、まず「その 3 ヶ月はいつから数えると思ったか」を聞く。
+`starting_point_check` を選び、解説せず、まず「その 3 ヶ月はいつから数えると思ったか」を聞く。
 
 ## Anti-patterns to Avoid
 

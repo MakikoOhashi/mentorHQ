@@ -76,6 +76,9 @@ Coach の最終判断を保持する。
 
 - coach_decision
 - selected_intervention
+- intervention_type
+- intervention_target
+- observation_goal
 - decision_reason
 - rejected_recommendations
 - decision_trace
@@ -155,6 +158,9 @@ Coach の最終判断を保持する。
 - decision_id
 - session_id
 - selected_intervention
+- intervention_type
+- intervention_target
+- observation_goal
 - decision_reason
 - rejected_recommendations
 - decision_trace
@@ -204,6 +210,7 @@ Coach の最終判断を保持する。
     {
       "agent_name": "Misconception Agent",
       "finding": "Likely confusion about the starting point of the 3-month period.",
+      "intervention_type": "starting_point_check",
       "recommendation": "Ask when the learner thinks the 3-month period begins.",
       "confidence": 0.86,
       "evidence": [
@@ -215,6 +222,7 @@ Coach の最終判断を保持する。
     {
       "agent_name": "Memory Agent",
       "finding": "Third similar mistake in deadline-based questions.",
+      "intervention_type": "starting_point_check",
       "recommendation": "Use the same short check-question format that worked last week.",
       "confidence": 0.78,
       "evidence": [
@@ -224,7 +232,10 @@ Coach の最終判断を保持する。
     }
   ],
   "decision_layer": {
-    "selected_intervention": "ask_starting_point",
+    "selected_intervention": "starting_point_check",
+    "intervention_type": "starting_point_check",
+    "intervention_target": "3-month period starting point",
+    "observation_goal": "Check whether the learner can identify when the period begins before receiving explanation.",
     "decision_reason": "High-confidence misconception hypothesis plus repeated pattern.",
     "rejected_recommendations": [
       "give full explanation now"
@@ -240,5 +251,15 @@ Coach の最終判断を保持する。
     ],
     "coach_notes": "Short re-check questions work better than full explanations when fatigue is high."
   }
+}
+```
+
+## Focused Decision Example
+
+```json
+{
+  "intervention_type": "starting_point_check",
+  "intervention_target": "3-month period starting point",
+  "observation_goal": "Check whether the learner can identify when the period begins before receiving explanation."
 }
 ```
