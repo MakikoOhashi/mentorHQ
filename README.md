@@ -115,3 +115,21 @@ The coach can then choose a focused check question or integrated retry based on 
 - `docs/07_IMPLEMENTATION_PLAN.md`
 - `docs/08_TERMINOLOGY.md` - MentorHQ の canonical terminology, naming rules, ambiguous term handling
 - `docs/09_UI_BLUEPRINT.md` - MentorHQ MVP の2カラムUI、state-based UI flow、mock data contract を定義する設計書
+
+## Phase 1 Static UI
+
+このリポジトリには、Phase 1 用の静的な `Mentor Workspace` 画面を追加しています。
+
+- 左: `Learner / Coach Workspace`
+- 右: `Coach Decision Workspace`
+- すべて固定 mock data
+- API / DB / 認証なし
+
+### Run
+
+```bash
+npm install
+npm run dev
+```
+
+その後、[http://localhost:3000](http://localhost:3000) を開いてください。
