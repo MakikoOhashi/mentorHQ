@@ -114,3 +114,4 @@ The coach can then choose a focused check question or integrated retry based on 
 - `docs/06_MVP_SCOPE.md`
 - `docs/07_IMPLEMENTATION_PLAN.md`
 - `docs/08_TERMINOLOGY.md` - MentorHQ の canonical terminology, naming rules, ambiguous term handling
+- `docs/09_UI_BLUEPRINT.md` - MentorHQ MVP の2カラムUI、state-based UI flow、mock data contract を定義する設計書
