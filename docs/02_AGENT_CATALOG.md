@@ -2,7 +2,7 @@
 
 ## Shared Design Rule
 
-すべての Agent は学習者へ直接教えず、Coach が判断しやすくなる report を返す。
+すべての Agent は学習者へ直接教えず、Coach が判断しやすくなる `agent_report` を返す。
 
 共通出力の軸:
 
@@ -37,8 +37,8 @@
 ### Input
 
 - selected answer
-- learner belief
-- reflection text
+- learner_belief
+- reflection
 - objective truth of each choice
 
 ### Output
@@ -46,7 +46,7 @@
 - misunderstanding type
 - focus phrase
 - suspected root cause
-- recommended check question
+- recommendation
 
 ### Responsibility
 
@@ -125,16 +125,16 @@
 
 ### Output
 
-- final intervention
-- next question action
-- decision trace
+- selected_intervention
+- next_action
+- decision_trace
 
 ### Responsibility
 
 - 複数 Agent の提案を統合する
 - 今回扱う論点を 1 つ選ぶ
 - learner-facing intervention を決定する
-- 選ばなかった recommendation も trace に残す
+- 選ばなかった recommendation も `decision_trace` に残す
 
 ## Example Output Shape
 

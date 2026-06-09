@@ -30,24 +30,24 @@ MentorHQ は AI Tutor ではなく、Coach Decision OS です。
 - Confidence
 - Evidence
 - Recommendation
-- Final coach decision trace
+- Decision trace
 
 ## Question Flow
 
 MentorHQ does not hardcode one teaching flow.
-It treats question handling as coach-selected intervention strategies.
+It treats question handling as coach-selected `intervention_type`s.
 
-For the MVP, leg breakdown is the default observation strategy because it makes learner belief visible before explanation.
+For the MVP, leg breakdown is the default `intervention_type` because it makes learner belief visible before explanation.
 The coach can then choose a focused check question or integrated retry based on agent reports.
 
 1. Select past exam question
 2. Coach selects an intervention type based on current context
-3. Default MVP strategy is leg breakdown
+3. Default MVP `intervention_type` is leg_breakdown
 4. Ask learner to judge each selected leg as true / false / unsure
 5. Ask short reason only when useful
 6. Store learner belief separately from objective truth
 7. Run relevant Agents
-8. Coach selects next intervention
+8. Coach selects the next `selected_intervention`
 9. Repeat only if the next observation is useful
 10. Show original integrated multiple-choice question when ready
 11. Ask final answer
@@ -76,7 +76,7 @@ The coach can then choose a focused check question or integrated retry based on 
 
 - 左右 2 カラム UI
 - 過去問 1 問
-- leg_breakdown as default MVP intervention strategy
+- leg_breakdown as default MVP intervention_type
 - intervention_type selection by Coach
 - 短い理由入力
 - Agent Reports
@@ -113,3 +113,4 @@ The coach can then choose a focused check question or integrated retry based on 
 - `docs/05_DATA_MODEL.md`
 - `docs/06_MVP_SCOPE.md`
 - `docs/07_IMPLEMENTATION_PLAN.md`
+- `docs/08_TERMINOLOGY.md` - MentorHQ の canonical terminology, naming rules, ambiguous term handling

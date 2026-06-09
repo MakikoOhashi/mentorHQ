@@ -2,7 +2,7 @@
 
 ## System Layout
 
-MentorHQ の基本構成は、中央に Coach、左に Learner interaction、右に Agent reports を置く 2 カラム構成とする。
+MentorHQ の基本構成は、中央に Coach、左に Learner interaction、右に agent_report を置く 2 カラム構成とする。
 
 ```text
 ┌──────────────────────────────┬──────────────────────────────┐
@@ -17,7 +17,7 @@ MentorHQ の基本構成は、中央に Coach、左に Learner interaction、右
 └──────────────────────────────┴──────────────────────────────┘
                      \            |            /
                       \           |           /
-                           Final Coach Judgment
+                               Coach Decision
 ```
 
 ## Core Roles
@@ -32,10 +32,10 @@ MentorHQ の基本構成は、中央に Coach、左に Learner interaction、右
 ### Coach
 
 - 学習者からの入力を受け取る
-- Agent report を比較する
+- `agent_report` を比較する
 - 今回扱う論点を 1 つに絞る
-- 学習者への介入文と次アクションを決める
-- 最終 decision trace を残す
+- 学習者への介入文と `next_action` を決める
+- 最終 `decision_trace` を残す
 
 ### Agents
 
@@ -57,7 +57,7 @@ MentorHQ MVP では以下を周辺 Agent とする。
 - Health Agent
 - Load Agent
 
-各 Agent は Coach に対して report を返し、Coach が最終判断する。
+各 Agent は Coach に対して `agent_report` を返し、Coach が最終判断する。
 
 ```text
 Memory Agent ───────────────┐
@@ -95,7 +95,7 @@ Agent の出力は learner-facing message ではなく、coach-facing decision m
 - Confidence
 - Evidence
 - Recommendation
-- Final coach decision trace
+- Decision trace
 
 ## Interaction Principle
 
@@ -109,5 +109,5 @@ Agent の出力は learner-facing message ではなく、coach-facing decision m
 MVP の範囲では、Agent 間の重い相互依存は持たせない。
 
 - 各 Agent は shared facts と derived state から推定する
-- report の統合責務は Coach に置く
+- `agent_report` の統合責務は Coach に置く
 - orchestration よりも explainability を優先する

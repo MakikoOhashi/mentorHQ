@@ -38,11 +38,11 @@
 ## Phase 3
 
 - Coach Decision を Gemini またはルール + Gemini で実装
-- decision trace を保存
+- `decision_trace` を保存
 
 目的:
 
-- Agent report から coach action へつながる流れを閉じる
+- `agent_report` から `selected_intervention` へつながる流れを閉じる
 - explainability を最低限成立させる
 
 ## Phase 4
@@ -66,13 +66,13 @@
 
 ## Recommended Build Order
 
-1. Question flow を固定する
+1. `question_flow` を固定する
 2. Shared facts schema を定義する
-3. Agent report schema を定義する
+3. `agent_report` schema を定義する
 4. Mock reports で Coach UI を作る
 5. Misconception Agent を接続する
 6. Memory lookup を接続する
-7. Coach decision trace を保存する
+7. `decision_trace` を保存する
 8. Cloud Run 向けにまとめる
 
 ## Technical Notes

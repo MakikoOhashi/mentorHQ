@@ -54,11 +54,10 @@ Shared Facts から要約される現在状態。
 各 Agent が返す推定と推薦。
 
 - agent_report
-- agent_recommendation
 - confidence
 - evidence
 - rationale
-- recommended_next_action
+- next_action
 
 ### Report Minimum Schema
 
