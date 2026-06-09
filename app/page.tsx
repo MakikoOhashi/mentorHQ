@@ -1,12 +1,9 @@
-type AgentReport = {
+type DiscussionMessage = {
   agentName: string;
-  label: string;
+  role: string;
   icon: string;
-  finding: string;
-  risk: string;
-  recommendation: string;
-  confidence: number;
-  evidence: string[];
+  tone: "primary" | "support" | "consensus";
+  message: string;
 };
 
 const workspace = {
@@ -19,55 +16,51 @@ const workspace = {
     "相続放棄は、相続の開始があった時から3箇月以内にしなければならない。",
   learnerBelief: "正しいと思った",
   reflection: "3ヶ月以内と書いてあるので正しいと思った。",
-  coachDecision: {
-    interventionType: "starting_point_check",
-    selectedIntervention: "その3ヶ月は、いつから数えると思いましたか？",
-    interventionTarget: "3-month period starting point",
-    observationGoal:
-      "学習者が説明前に起算点を言語化できるか確認する",
-    decisionReason:
-      "起算点の誤認が見えており、しかも今は長い説明より短い確認質問のほうが学習者の考えを観測しやすいため",
-    selectedPriority: "説明より先に、起算点の誤認を短く観測する",
-    whyNow: "高負荷セッションのため、長い解説より1問の確認質問を優先する",
-    rejectedRecommendations: ["全文解説を先に出す", "追加問題へすぐ進む"],
-    decisionTrace:
-      "Coach chose starting_point_check instead of explanation because the system needs to observe the learner's belief before revealing the rule."
-  },
-  agentReports: [
+  discussionSummary:
+    "AIチームが学習者の状態を持ち寄り、最短で誤解の根を確かめる介入をすり合わせています。",
+  discussion: [
     {
       agentName: "Misconception Agent",
-      label: "誤解",
+      role: "誤解の仮説",
       icon: "🧠",
-      finding: "起算点誤認の可能性",
-      risk: "期間だけに反応し、起算点を確認していない",
-      recommendation: "その3ヶ月をいつから数えると思ったか確認する",
-      confidence: 0.86,
-      evidence: [
-        "reflection が「3ヶ月以内」にのみ言及している",
-        "起算点に関する記述がない"
-      ]
+      tone: "primary",
+      message:
+        "起算点を誤認している可能性があります。学習者は『3ヶ月以内』には反応していますが、いつから数えるかには触れていません。"
     },
     {
       agentName: "Memory Agent",
-      label: "履歴",
+      role: "過去パターン",
       icon: "🔁",
-      finding: "同種ミスが再発",
-      risk: "法的期間の読み方に弱点がある",
-      recommendation: "短い確認質問で起算点を言語化させる",
-      confidence: 0.78,
-      evidence: ["prior_cases: 2026-05-30", "prior_cases: 2026-06-03"]
+      tone: "support",
+      message:
+        "過去にも似た読み違いがありました。前回は起算点だけを短く確認したあと、自力で理解を修正できています。"
     },
     {
       agentName: "Load Agent",
-      label: "負荷",
+      role: "認知負荷",
       icon: "⚖️",
-      finding: "短い確認が適切",
-      risk: "長い解説は処理負荷を上げる",
-      recommendation: "解説ではなく1問だけ確認質問にする",
-      confidence: 0.72,
-      evidence: ["recent_accuracy: unstable", "session_load: high"]
+      tone: "support",
+      message:
+        "今回は論点を増やさない方がよさそうです。長い解説ではなく、起算点だけを尋ねる一問に絞ることを推奨します。"
+    },
+    {
+      agentName: "Misconception Agent",
+      role: "合意形成",
+      icon: "🧠",
+      tone: "consensus",
+      message:
+        "了解です。第一候補は『3ヶ月をいつから数えると思ったか』の確認でいきましょう。誤解の根本を最短で観測できます。"
     }
-  ] satisfies AgentReport[]
+  ] satisfies DiscussionMessage[],
+  coachDecision: {
+    title: "起算点確認を採用",
+    selectedIntervention: "その3ヶ月は、いつから数えると思いましたか？",
+    observationGoal: "学習者が説明前に起算点を言語化できるか確認する",
+    decisionReason:
+      "誤解の根本原因を最短で検証でき、しかも高負荷の場面でも学習者の思考を崩さず観測できるため",
+    selectedPriority: "説明より先に、起算点の誤認を短く観測する",
+    whyNow: "いまは理解を増やすより、まず認識のズレを一点で確かめる段階です。"
+  }
 };
 
 export default function Home() {
@@ -116,50 +109,33 @@ export default function Home() {
 
         <div className="column">
           <div className="column-header">
-            <p className="eyebrow">観察と介入</p>
-            <h2>コーチが次の一手を決める</h2>
+            <p className="eyebrow">AI Team Deliberation</p>
+            <h2>複数Agentが議論し、Coachが介入を決める</h2>
           </div>
 
-          <article className="panel compact">
-            <div className="panel-heading tight">
-              <span className="panel-kicker">What We Noticed</span>
-              <h3>学習者について見えてきたこと</h3>
+          <article className="panel discussion-panel">
+            <div className="panel-heading tight discussion-heading">
+              <div>
+                <span className="panel-kicker">Agent Discussion</span>
+                <h3>AIスタッフ会議の実況</h3>
+              </div>
+              <span className="live-pill">Live Deliberation</span>
             </div>
-            <div className="report-list compact-reports">
-              {workspace.agentReports.map((report) => (
-                <section className="agent-card signal-card" key={report.agentName}>
-                  <div className="signal-head">
-                    <span className="signal-icon">{report.icon}</span>
-                    <div className="signal-meta">
-                      <span className="signal-label">{report.label}</span>
-                      <span className="signal-agent">{report.agentName}</span>
-                    </div>
+            <p className="body-copy compact-copy">{workspace.discussionSummary}</p>
+
+            <div className="discussion-timeline">
+              {workspace.discussion.map((entry, index) => (
+                <section className={`discussion-row tone-${entry.tone}`} key={`${entry.agentName}-${index}`}>
+                  <div className="discussion-avatar" aria-hidden="true">
+                    {entry.icon}
                   </div>
-                  <p className="signal-finding">{report.finding}</p>
-                  <p className="signal-score">{Math.round(report.confidence * 100)}%</p>
-                  <details className="agent-details">
-                    <summary>詳細を見る</summary>
-                    <div className="detail-list">
-                      <div>
-                        <dt>見立て</dt>
-                        <dd>{report.risk}</dd>
-                      </div>
-                      <div>
-                        <dt>推奨</dt>
-                        <dd>{report.recommendation}</dd>
-                      </div>
-                      <div>
-                        <dt>根拠</dt>
-                        <dd>
-                          <ul className="evidence-list">
-                            {report.evidence.map((item) => (
-                              <li key={item}>{item}</li>
-                            ))}
-                          </ul>
-                        </dd>
-                      </div>
+                  <div className="discussion-bubble">
+                    <div className="discussion-meta">
+                      <span className="discussion-agent">{entry.agentName}</span>
+                      <span className="discussion-role">{entry.role}</span>
                     </div>
-                  </details>
+                    <p>{entry.message}</p>
+                  </div>
                 </section>
               ))}
             </div>
@@ -169,40 +145,23 @@ export default function Home() {
             <div className="decision-hero">
               <div>
                 <span className="panel-kicker">Coach Decision</span>
-                <h3>✅ まずは起算点の捉え方を確かめる</h3>
+                <h3>{workspace.coachDecision.title}</h3>
               </div>
               <p className="decision-summary">{workspace.coachDecision.selectedPriority}</p>
               <div className="reason-inline">
-                <span className="summary-label">なぜこの判断か</span>
+                <span className="summary-label">理由</span>
                 <p>{workspace.coachDecision.decisionReason}</p>
               </div>
-              <details className="mini-details">
-                <summary>補足を見る</summary>
-                <div className="detail-list">
-                  <div>
-                    <dt>なぜ今か</dt>
-                    <dd>{workspace.coachDecision.whyNow}</dd>
-                  </div>
-                  <div>
-                    <dt>観測目的</dt>
-                    <dd>{workspace.coachDecision.observationGoal}</dd>
-                  </div>
-                  <div>
-                    <dt>見送った案</dt>
-                    <dd>
-                      <ul className="evidence-list">
-                        {workspace.coachDecision.rejectedRecommendations.map((item) => (
-                          <li key={item}>{item}</li>
-                        ))}
-                      </ul>
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>判断ログ</dt>
-                    <dd>{workspace.coachDecision.decisionTrace}</dd>
-                  </div>
+              <div className="decision-grid">
+                <div className="decision-note">
+                  <span className="summary-label">観測目的</span>
+                  <p>{workspace.coachDecision.observationGoal}</p>
                 </div>
-              </details>
+                <div className="decision-note">
+                  <span className="summary-label">なぜ今か</span>
+                  <p>{workspace.coachDecision.whyNow}</p>
+                </div>
+              </div>
             </div>
           </article>
 
@@ -212,7 +171,7 @@ export default function Home() {
               <h3>次の問い</h3>
             </div>
             <blockquote className="next-question-copy">
-              {workspace.coachDecision.selectedIntervention}
+              「{workspace.coachDecision.selectedIntervention}」
             </blockquote>
           </article>
         </div>
