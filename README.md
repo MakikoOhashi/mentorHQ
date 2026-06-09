@@ -12,7 +12,25 @@ MentorHQ は AI Tutor ではなく、Coach Decision OS です。
 - 学習者に直接話しかける主役は常に Coach
 - Agent は learner-facing ではなく coach-facing
 - Agent は教えるのではなく、観察・分析・推薦を行う
+- Agent は他 Agent の観測を受けて判断を更新する
 - 最後に学習者へ介入するのは Coach
+
+## Deliberation Model
+
+MentorHQ は「Agent が個別に分析するシステム」ではなく、
+「複数 Agent が学習者について解釈を形成し、その上で Coach が意思決定するシステム」として設計する。
+
+```text
+Learner
+  ↓
+Initial Agent Observations
+  ↓
+Agent Deliberation
+  ↓
+Coach Decision
+  ↓
+Intervention
+```
 
 ## Two-column UI
 
@@ -26,7 +44,8 @@ MentorHQ は AI Tutor ではなく、Coach Decision OS です。
 
 ### Right Column
 
-- Agent reports
+- Initial agent observations
+- Agent deliberation stream
 - Confidence
 - Evidence
 - Recommendation
@@ -38,7 +57,7 @@ MentorHQ does not hardcode one teaching flow.
 It treats question handling as coach-selected `intervention_type`s.
 
 For the MVP, leg breakdown is the default `intervention_type` because it makes learner belief visible before explanation.
-The coach can then choose a focused check question or integrated retry based on agent reports.
+The coach can then choose a focused check question or integrated retry based on agent observations and deliberation.
 
 1. Select past exam question
 2. Coach selects an intervention type based on current context
@@ -80,6 +99,7 @@ The coach can then choose a focused check question or integrated retry based on 
 - intervention_type selection by Coach
 - 短い理由入力
 - Agent Reports
+- Agent Deliberation
 - Coach Decision
 - Final integrated question
 - Decision trace
@@ -115,6 +135,7 @@ The coach can then choose a focused check question or integrated retry based on 
 - `docs/07_IMPLEMENTATION_PLAN.md`
 - `docs/08_TERMINOLOGY.md` - MentorHQ の canonical terminology, naming rules, ambiguous term handling
 - `docs/09_UI_BLUEPRINT.md` - MentorHQ MVP の2カラムUI、state-based UI flow、mock data contract を定義する設計書
+- `docs/10_AGENT_DELIBERATION.md` - Agent Deliberation の定義、責務変更、UI 含意を定義する設計書
 
 ## Phase 1 Static UI
 

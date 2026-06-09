@@ -4,7 +4,7 @@
 
 MentorHQ MVP の UI は学習アプリ画面ではない。
 
-MentorHQ MVP の UI は、Coach が learner response を受け取り、`agent_report` を比較し、`selected_intervention` を決めるための Coach Decision UI である。
+MentorHQ MVP の UI は、Coach が learner response を受け取り、initial agent observations と `agent_deliberation` を見て、`selected_intervention` を決めるための Coach Decision UI である。
 
 - 主役は learner-facing explanation ではなく Coach decision support
 - 画面の価値は Agent の賢さそのものではなく、Coach が何を見て何を選ぶかを可視化すること
@@ -18,7 +18,7 @@ MentorHQ MVP の UI は、Coach が learner response を受け取り、`agent_re
 ┌──────────────────────────────┬──────────────────────────────┐
 │ Learner / Coach Workspace    │ Coach Decision Workspace     │
 │                              │                              │
-│ - Question                   │ - Agent Reports              │
+│ - Question                   │ - Agent Deliberation Stream  │
 │ - Leg Judgment               │ - Coach Thinking             │
 │ - Reflection Input           │ - Decision Trace             │
 │ - Coach Response             │ - Selected Intervention      │
@@ -86,13 +86,14 @@ MentorHQ MVP の UI は、Coach が learner response を受け取り、`agent_re
 
 Coach の頭の中で何が起きているかを可視化する。
 
-### Agent Reports
+### Agent Deliberation Stream
 
-各 `agent_report` をカードで表示する。
+initial observation と deliberation update を時系列カードで表示する。
 
 カード項目:
 
 - `agent_name`
+- `phase`
 - `finding`
 - `risk`
 - `recommendation`
@@ -104,10 +105,11 @@ Coach の頭の中で何が起きているかを可視化する。
 - 各カードは coach-facing only
 - recommendation は learner-facing message ではなく判断材料として表示
 - evidence は短く箇条書きで見せ、比較しやすさを優先する
+- update が入った Agent は「何が変わったか」を追えるようにする
 
 ### Coach Thinking
 
-Coach が複数 `agent_report` を比較する領域。
+Coach が複数 Agent の観測と更新過程を比較する領域。
 
 表示項目:
 
@@ -118,7 +120,7 @@ Coach が複数 `agent_report` を比較する領域。
 
 表示方針:
 
-- Agent 間の食い違いを明示する
+- Agent 間の食い違いと更新理由を明示する
 - 何を採用し、何を見送ったかを同時に残す
 - 「なぜ今その問い返しなのか」を 1 文で説明できる形にする
 
@@ -176,44 +178,51 @@ Coach が learner に返す最終介入。
 - trigger: learner judgment が送信され、reflection を求める条件を満たした
 - left column display: selected judgment, reflection input
 - right column display: provisional observation note
-- next state: `agent_reports_ready`
+- next state: `agent_observations_ready`
 
-### 4. `agent_reports_ready`
+### 4. `agent_observations_ready`
 
 - trigger: relevant Agents が `agent_report[]` を返した
 - left column display: question, selected judgment, reflection summary
-- right column display: Agent Reports cards
+- right column display: initial observation cards
+- next state: `agent_deliberation_ready`
+
+### 5. `agent_deliberation_ready`
+
+- trigger: relevant Agents が他 Agent 観測を受けて recommendation / confidence を更新した
+- left column display: learner inputs summary
+- right column display: Agent Deliberation Stream, Coach Thinking, draft Decision Trace
 - next state: `coach_decision_ready`
 
-### 5. `coach_decision_ready`
+### 6. `coach_decision_ready`
 
-- trigger: Coach が `agent_report` 比較に必要な材料を揃えた
+- trigger: Coach が observation と deliberation 比較に必要な材料を揃えた
 - left column display: learner inputs summary
-- right column display: Agent Reports, Coach Thinking, draft Decision Trace
+- right column display: Agent Deliberation Stream, Coach Thinking, draft Decision Trace
 - next state: `coach_response_shown`
 
-### 6. `coach_response_shown`
+### 7. `coach_response_shown`
 
 - trigger: Coach が `selected_intervention` を確定した
 - left column display: Coach response
 - right column display: finalized Decision Trace, Selected Intervention
 - next state: `integrated_retry_ready`
 
-### 7. `integrated_retry_ready`
+### 8. `integrated_retry_ready`
 
 - trigger: focused check 完了後、本来の一問へ戻す準備ができた
 - left column display: integrated_retry question, final answer input
 - right column display: previous Decision Trace, expected signal
 - next state: `final_answer_submitted`
 
-### 8. `final_answer_submitted`
+### 9. `final_answer_submitted`
 
 - trigger: learner が本来の一問に最終回答した
 - left column display: final answer summary
 - right column display: local-vs-integrated comparison summary
 - next state: `decision_stored`
 
-### 9. `decision_stored`
+### 10. `decision_stored`
 
 - trigger: `coach_decision`, `decision_trace`, outcome が保存された
 - left column display: completed case summary
@@ -228,21 +237,22 @@ Coach が learner に返す最終介入。
 2. learner marks it `true`
 3. learner writes: 「3ヶ月以内と書いてあるので正しいと思った」
 4. `Misconception Agent` reports starting-point confusion
-5. `Memory Agent` reports similar mistake repeated
-6. `Load Agent` recommends short check instead of long explanation
-7. Coach selects:
+5. `Memory Agent` adds repeated-pattern context
+6. `Misconception Agent` updates confidence after cross-agent input
+7. `Load Agent` recommends short check instead of long explanation
+8. Coach selects:
    - `intervention_type`: `starting_point_check`
    - `intervention_target`: `3-month period starting point`
    - `observation_goal`: `check whether learner can identify when the period begins`
-8. Coach asks: 「その3ヶ月は、いつから数えると思いましたか？」
-9. learner responds
-10. Coach moves to `integrated_retry`
+9. Coach asks: 「その3ヶ月は、いつから数えると思いましたか？」
+10. learner responds
+11. Coach moves to `integrated_retry`
 
 ## Interaction Rules
 
 - Agent は learner に直接話さない
 - Coach だけが learner-facing message を出す
-- Agent Reports は右カラムのみ
+- Agent Deliberation Stream は右カラムのみ
 - 1回の `selected_intervention` で扱う論点は 1 つ
 - UI は Agent の賢さではなく、Coach decision support を見せる
 
@@ -255,6 +265,7 @@ UI が必要とする最低限の mock data:
 - `learner_belief`
 - `reflection_event`
 - `agent_report[]`
+- `agent_deliberation[]`
 - `coach_decision`
 - `selected_intervention`
 - `decision_trace`

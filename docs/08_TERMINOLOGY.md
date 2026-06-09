@@ -27,6 +27,7 @@
 | Coach | `README.md`, `docs/00_VISION.md`, `docs/01_AGENT_ARCHITECTURE.md`, `docs/02_AGENT_CATALOG.md`, `docs/03_COACH_DECISION_FLOW.md`, `docs/04_QUESTION_FLOW.md`, `docs/06_MVP_SCOPE.md` | 学習者への最終対応と意思決定を担う主体 | final coach judgment, coach action | `coach` |
 | Agent | 全体 | Coach を支援する分析主体 | analytical assistant, specialized AI agents | `agent` |
 | agent report / Agent report / Agent Reports / reports | `README.md`, `docs/00_VISION.md`, `docs/01_AGENT_ARCHITECTURE.md`, `docs/02_AGENT_CATALOG.md`, `docs/03_COACH_DECISION_FLOW.md`, `docs/04_QUESTION_FLOW.md`, `docs/06_MVP_SCOPE.md`, `docs/07_IMPLEMENTATION_PLAN.md` | Agent が Coach に返す分析結果 | report, reports, decision material | `agent_report` |
+| agent deliberation / Agent Deliberation | `docs/01_AGENT_ARCHITECTURE.md`, `docs/03_COACH_DECISION_FLOW.md`, `docs/09_UI_BLUEPRINT.md` | Agent 同士が観測結果を共有し、仮説・信頼度・推奨介入を更新するプロセス | agent discussion, deliberation stream | `agent_deliberation` |
 | recommendation | `docs/01_AGENT_ARCHITECTURE.md`, `docs/02_AGENT_CATALOG.md`, `docs/03_COACH_DECISION_FLOW.md`, `docs/05_DATA_MODEL.md` | Agent が提案する次の一手 | recommended check question, recommended_next_action | `recommendation` |
 | coach decision / Coach Decision | `README.md`, `docs/05_DATA_MODEL.md`, `docs/06_MVP_SCOPE.md`, `docs/07_IMPLEMENTATION_PLAN.md` | Coach が最終的に採用する判断 | final coach judgment, final intervention, coach action | `coach_decision` |
 | decision trace / Decision trace | `README.md`, `docs/01_AGENT_ARCHITECTURE.md`, `docs/02_AGENT_CATALOG.md`, `docs/05_DATA_MODEL.md`, `docs/06_MVP_SCOPE.md`, `docs/07_IMPLEMENTATION_PLAN.md` | Coach の判断根拠の記録 | trace, final coach decision trace | `decision_trace` |
@@ -67,6 +68,7 @@
 | `learner` | 学習対象者 | UI では `Learner`、データモデルでは `learner` |
 | `agent` | Coach を支援する専門分析主体 | 個別名は `Memory Agent` など固有名詞扱い |
 | `agent_report` | Agent が返す分析結果 1 件 | `report` 単独表現は避ける |
+| `agent_deliberation` | Agent 間で観測を共有し、仮説や recommendation を更新するプロセス | UI 演出ではなく設計概念として使う |
 | `coach_decision` | Coach が最終的に採用した判断 | `final coach judgment` より優先 |
 | `decision_trace` | Coach がその判断に至った経緯の記録 | `trace` 単独表現は避ける |
 
@@ -108,6 +110,7 @@
 - `intervention_target` = 介入対象
 - `observation_goal` = 観測目的
 - `agent_report` = Agent が返す分析結果
+- `agent_deliberation` = Agent 間の情報共有と仮説更新プロセス
 - `coach_decision` = Coach が最終的に採用した判断
 - `learner_belief` = 学習者が真だと思っている内容
 - `objective_truth` = システム側が保持する正解状態
