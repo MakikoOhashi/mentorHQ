@@ -1,5 +1,7 @@
 type AgentReport = {
   agentName: string;
+  label: string;
+  icon: string;
   finding: string;
   risk: string;
   recommendation: string;
@@ -24,7 +26,7 @@ const workspace = {
     observationGoal:
       "学習者が説明前に起算点を言語化できるか確認する",
     decisionReason:
-      "Misconception Agent と Memory Agent が同じ起算点誤認を示し、Load Agent が短い確認質問を推奨したため",
+      "起算点の誤認が見えており、しかも今は長い説明より短い確認質問のほうが学習者の考えを観測しやすいため",
     selectedPriority: "説明より先に、起算点の誤認を短く観測する",
     whyNow: "高負荷セッションのため、長い解説より1問の確認質問を優先する",
     rejectedRecommendations: ["全文解説を先に出す", "追加問題へすぐ進む"],
@@ -34,6 +36,8 @@ const workspace = {
   agentReports: [
     {
       agentName: "Misconception Agent",
+      label: "誤解",
+      icon: "🧠",
       finding: "起算点誤認の可能性",
       risk: "期間だけに反応し、起算点を確認していない",
       recommendation: "その3ヶ月をいつから数えると思ったか確認する",
@@ -45,7 +49,9 @@ const workspace = {
     },
     {
       agentName: "Memory Agent",
-      finding: "同種ミスの再発傾向",
+      label: "履歴",
+      icon: "🔁",
+      finding: "同種ミスが再発",
       risk: "法的期間の読み方に弱点がある",
       recommendation: "短い確認質問で起算点を言語化させる",
       confidence: 0.78,
@@ -53,7 +59,9 @@ const workspace = {
     },
     {
       agentName: "Load Agent",
-      finding: "短い確認が有効",
+      label: "負荷",
+      icon: "⚖️",
+      finding: "短い確認が適切",
       risk: "長い解説は処理負荷を上げる",
       recommendation: "解説ではなく1問だけ確認質問にする",
       confidence: 0.72,
@@ -68,11 +76,7 @@ export default function Home() {
       <section className="hero">
         <div>
           <p className="eyebrow">MentorHQ MVP Demo</p>
-          <h1>Mentor Workspace</h1>
-          <p className="hero-copy">
-            Agent が何を検出し、Coach がどの介入を選んだかを
-            10秒で追える意思決定デモです。
-          </p>
+          <h1>Coach Workspace</h1>
         </div>
         <div className="hero-meta">
           <span>{workspace.exam}</span>
@@ -87,23 +91,23 @@ export default function Home() {
             <h2>学習者の状況</h2>
           </div>
 
-          <article className="panel compact">
-            <div className="panel-heading">
+          <article className="panel compact problem-panel">
+            <div className="panel-heading tight">
               <span className="panel-kicker">問題</span>
               <h3>{workspace.questionTitle}</h3>
             </div>
-            <p className="body-copy">{workspace.questionStem}</p>
+            <p className="body-copy compact-copy">{workspace.questionStem}</p>
             <p className="leg-statement">{workspace.currentLeg}</p>
           </article>
 
-          <article className="panel compact">
+          <article className="panel compact answer-panel">
             <div className="compact-stack">
               <div>
-                <span className="summary-label">現在の回答</span>
+                <span className="summary-label">学習者の回答</span>
                 <p className="value-text">{workspace.learnerBelief}</p>
               </div>
               <div>
-                <span className="summary-label">learner reasoning</span>
+                <span className="summary-label">理由</span>
                 <div className="reflection-box">{workspace.reflection}</div>
               </div>
             </div>
@@ -112,85 +116,40 @@ export default function Home() {
 
         <div className="column">
           <div className="column-header">
-            <p className="eyebrow">意思決定</p>
-            <h2>コーチ判断</h2>
+            <p className="eyebrow">観察と介入</p>
+            <h2>コーチが次の一手を決める</h2>
           </div>
 
-          <article className="panel spotlight compact">
-            <div className="panel-heading">
-              <span className="panel-kicker">コーチ判断</span>
-              <h3>次の一手</h3>
-            </div>
-            <div className="decision-core">
-              <div className="decision-summary">
-                <span className="summary-label">選択した介入</span>
-                <blockquote>{workspace.coachDecision.selectedIntervention}</blockquote>
-              </div>
-              <div className="decision-meta">
-                <div className="summary-card">
-                  <span className="summary-label">介入タイプ</span>
-                  <strong>{workspace.coachDecision.interventionType}</strong>
-                </div>
-                <div className="summary-card">
-                  <span className="summary-label">観測対象</span>
-                  <strong>{workspace.coachDecision.interventionTarget}</strong>
-                </div>
-                <div className="summary-card wide">
-                  <span className="summary-label">観測目的</span>
-                  <strong>{workspace.coachDecision.observationGoal}</strong>
-                </div>
-              </div>
-            </div>
-          </article>
-
           <article className="panel compact">
-            <div className="panel-heading">
-              <span className="panel-kicker">なぜこの介入か</span>
-              <h3>判断理由</h3>
-            </div>
-            <div className="thinking-grid single-row">
-              <div className="thinking-card">
-                <span className="summary-label">優先したこと</span>
-                <p>{workspace.coachDecision.selectedPriority}</p>
-              </div>
-              <div className="thinking-card">
-                <span className="summary-label">なぜ今か</span>
-                <p>{workspace.coachDecision.whyNow}</p>
-              </div>
-              <div className="thinking-card">
-                <span className="summary-label">見送った案</span>
-                <ul className="evidence-list">
-                  {workspace.coachDecision.rejectedRecommendations.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          </article>
-
-          <article className="panel compact">
-            <div className="panel-heading">
-              <span className="panel-kicker">Agent分析</span>
-              <h3>要点だけ表示</h3>
+            <div className="panel-heading tight">
+              <span className="panel-kicker">What We Noticed</span>
+              <h3>学習者について見えてきたこと</h3>
             </div>
             <div className="report-list compact-reports">
               {workspace.agentReports.map((report) => (
-                <section className="agent-card compact-agent-card" key={report.agentName}>
-                  <div className="agent-topline">
-                    <h4>{report.agentName}</h4>
-                    <span>{Math.round(report.confidence * 100)}%</span>
+                <section className="agent-card signal-card" key={report.agentName}>
+                  <div className="signal-head">
+                    <span className="signal-icon">{report.icon}</span>
+                    <div className="signal-meta">
+                      <span className="signal-label">{report.label}</span>
+                      <span className="signal-agent">{report.agentName}</span>
+                    </div>
                   </div>
-                  <p className="agent-summary">{report.finding}</p>
-                  <p className="agent-recommendation">{report.recommendation}</p>
+                  <p className="signal-finding">{report.finding}</p>
+                  <p className="signal-score">{Math.round(report.confidence * 100)}%</p>
                   <details className="agent-details">
                     <summary>詳細を見る</summary>
                     <div className="detail-list">
                       <div>
-                        <dt>Risk</dt>
+                        <dt>見立て</dt>
                         <dd>{report.risk}</dd>
                       </div>
                       <div>
-                        <dt>Evidence</dt>
+                        <dt>推奨</dt>
+                        <dd>{report.recommendation}</dd>
+                      </div>
+                      <div>
+                        <dt>根拠</dt>
                         <dd>
                           <ul className="evidence-list">
                             {report.evidence.map((item) => (
@@ -206,17 +165,55 @@ export default function Home() {
             </div>
           </article>
 
-          <article className="panel compact">
-            <div className="panel-heading">
-              <span className="panel-kicker">判断ログ</span>
-              <h3>最終判断の記録</h3>
+          <article className="panel spotlight decision-panel">
+            <div className="decision-hero">
+              <div>
+                <span className="panel-kicker">Coach Decision</span>
+                <h3>✅ まずは起算点の捉え方を確かめる</h3>
+              </div>
+              <p className="decision-summary">{workspace.coachDecision.selectedPriority}</p>
+              <div className="reason-inline">
+                <span className="summary-label">なぜこの判断か</span>
+                <p>{workspace.coachDecision.decisionReason}</p>
+              </div>
+              <details className="mini-details">
+                <summary>補足を見る</summary>
+                <div className="detail-list">
+                  <div>
+                    <dt>なぜ今か</dt>
+                    <dd>{workspace.coachDecision.whyNow}</dd>
+                  </div>
+                  <div>
+                    <dt>観測目的</dt>
+                    <dd>{workspace.coachDecision.observationGoal}</dd>
+                  </div>
+                  <div>
+                    <dt>見送った案</dt>
+                    <dd>
+                      <ul className="evidence-list">
+                        {workspace.coachDecision.rejectedRecommendations.map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
+                      </ul>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>判断ログ</dt>
+                    <dd>{workspace.coachDecision.decisionTrace}</dd>
+                  </div>
+                </div>
+              </details>
             </div>
-            <div className="trace-log">
-              <p className="trace-badge">decision_reason</p>
-              <p>{workspace.coachDecision.decisionReason}</p>
-              <p className="trace-badge">decision_trace</p>
-              <p>{workspace.coachDecision.decisionTrace}</p>
+          </article>
+
+          <article className="panel next-question-panel">
+            <div className="panel-heading tight">
+              <span className="panel-kicker">Next Question</span>
+              <h3>次の問い</h3>
             </div>
+            <blockquote className="next-question-copy">
+              {workspace.coachDecision.selectedIntervention}
+            </blockquote>
           </article>
         </div>
       </section>
