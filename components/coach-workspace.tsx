@@ -20,39 +20,46 @@ const agentIcons: Record<string, string> = {
   coach: "🎓"
 };
 
-const roundLabels: Record<number, string> = {
-  1: "Round 1 · Initial Observation",
-  2: "Round 2 · Cross-Agent Review",
-  3: "Round 3 · Recommendation Formation",
-  4: "Round 4 · Coach Decision"
+const shortSpeakerLabels: Record<string, string> = {
+  misconception: "誤解担当",
+  memory: "記憶担当",
+  load: "負荷担当",
+  coach: "コーチ"
 };
 
 function formatTypeLabel(event: DeliberationEvent) {
   if (event.type === "observation") return "初期観測";
+  if (event.type === "challenge") return "異議・補強";
   if (event.type === "revision") return "仮説更新";
   if (event.type === "recommendation") return "介入提案";
   return "最終判断";
 }
 
 function formatSpeakerName(event: DeliberationEvent) {
-  return event.speaker === "coach"
-    ? "Coach"
-    : `${event.speaker.charAt(0).toUpperCase()}${event.speaker.slice(1)} Agent`;
+  return shortSpeakerLabels[event.speaker] ?? event.speaker_label;
 }
 
 function getTone(event: DeliberationEvent) {
   if (event.speaker === "coach") return "consensus";
   if (event.type === "revision") return "primary";
+  if (event.type === "challenge") return "primary";
   if (event.type === "recommendation") return "consensus";
   return "support";
 }
 
 function getDisplayedConfidence(event: DeliberationEvent) {
-  if (event.type === "revision") {
-    return event.confidence_after;
-  }
+  return event.confidence_after ?? event.confidence_before ?? null;
+}
 
-  return event.confidence;
+function formatInfluencedBy(event: DeliberationEvent) {
+  if (!event.influenced_by?.length) return "";
+
+  const names = event.influenced_by.map((speaker) => shortSpeakerLabels[speaker] ?? speaker);
+  return `${names.join("・")}の指摘を反映`;
+}
+
+function getEventDelay(index: number) {
+  return index * 1050 + Math.floor(Math.random() * 301);
 }
 
 export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
@@ -63,6 +70,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const [mode, setMode] = useState<"mock" | "ai">("mock");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const timeoutIdsRef = useRef<number[]>([]);
+  const streamViewportRef = useRef<HTMLDivElement | null>(null);
 
   const clearScheduledUpdates = useCallback(() => {
     timeoutIdsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
@@ -104,7 +112,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
             }, 220);
             timeoutIdsRef.current.push(decisionTimeoutId);
           }
-        }, index * 540);
+        }, getEventDelay(index));
         timeoutIdsRef.current.push(timeoutId);
       });
     } catch (error) {
@@ -120,12 +128,21 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     };
   }, [clearScheduledUpdates, runDeliberation]);
 
-  const groupedEvents = useMemo(() => {
-    return events.reduce<Record<number, DeliberationEvent[]>>((accumulator, event) => {
-      accumulator[event.round] ??= [];
-      accumulator[event.round].push(event);
-      return accumulator;
-    }, {});
+  useEffect(() => {
+    const viewport = streamViewportRef.current;
+    if (!viewport) return;
+
+    viewport.scrollTo({
+      top: viewport.scrollHeight,
+      behavior: status === "streaming" ? "smooth" : "auto"
+    });
+  }, [events, status]);
+
+  const displayedEvents = useMemo(() => {
+    return events.map((event, index) => ({
+      event,
+      isLatest: index === events.length - 1
+    }));
   }, [events]);
 
   return (
@@ -180,9 +197,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
               <span className="panel-kicker">Run Control</span>
               <h3>Deliberation を再実行</h3>
             </div>
-            <p className="body-copy compact-copy">
-              Agent 同士が互いの観測を受けて、仮説・confidence・推奨介入を更新します。
-            </p>
+            <p className="body-copy compact-copy">短い発言を流しながら、次の一問を絞り込みます。</p>
             <button className="primary-button" onClick={() => void runDeliberation()} type="button">
               {status === "loading" || status === "streaming" ? "Running..." : "Run Deliberation"}
             </button>
@@ -193,77 +208,64 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
         <div className="column">
           <div className="column-header">
             <p className="eyebrow">Agent Deliberation Stream</p>
-            <h2>互いの観測で仮説が更新される流れ</h2>
+            <h2>AIスタッフ会議の実況</h2>
           </div>
 
           <article className="panel discussion-panel">
             <div className="panel-heading tight discussion-heading">
               <div>
                 <span className="panel-kicker">Deliberation Stream</span>
-                <h3>AIスタッフ会議の実況</h3>
+                <h3>短い発言が流れる会議ログ</h3>
               </div>
               <span className="live-pill">
                 {status === "done" ? "Completed" : status === "error" ? "Error" : "Live Deliberation"}
               </span>
             </div>
 
-            <div className="round-list">
-              {[1, 2, 3, 4].map((round) => (
-                <section className="round-block" key={round}>
-                  <div className="round-header">
-                    <span className="trace-badge">{roundLabels[round]}</span>
-                  </div>
+            <div className="stream-viewport" ref={streamViewportRef}>
+              <div className="discussion-timeline chat-timeline">
+                {displayedEvents.length === 0 ? (
+                  <div className="pending-row">最初の発言を待っています…</div>
+                ) : null}
 
-                  <div className="discussion-timeline">
-                    {(groupedEvents[round] ?? []).map((event, index) => (
-                      <section className={`discussion-row tone-${getTone(event)}`} key={`${event.speaker}-${round}-${index}`}>
-                        <div className="discussion-avatar" aria-hidden="true">
-                          {agentIcons[event.speaker]}
-                        </div>
-                        <div className="discussion-bubble">
-                          <div className="discussion-meta">
-                            <span className="discussion-agent">{formatSpeakerName(event)}</span>
-                            <span className="discussion-role">{formatTypeLabel(event)}</span>
-                            <span className="confidence-chip">
-                              {`${Math.round(getDisplayedConfidence(event) * 100)}%`}
-                            </span>
-                          </div>
-                          <p>{event.message}</p>
-                          <div className="trace-log">
-                            <p>
-                              <strong>Hypothesis:</strong> {event.hypothesis}
-                            </p>
-                            {"confidence_before" in event && event.confidence_before !== undefined ? (
-                              <p>
-                                <strong>Confidence:</strong> {Math.round(event.confidence_before * 100)}% →{" "}
-                                {Math.round((event.confidence_after ?? event.confidence_before) * 100)}%
-                              </p>
-                            ) : null}
-                            {event.influenced_by.length > 0 ? (
-                              <p>
-                                <strong>Influenced by:</strong> {event.influenced_by.join(", ")}
-                              </p>
-                            ) : (
-                              <p>
-                                <strong>Influenced by:</strong> independent initial read
-                              </p>
-                            )}
-                            {event.recommendation ? (
-                              <p>
-                                <strong>Recommendation:</strong> {event.recommendation}
-                              </p>
-                            ) : null}
-                          </div>
-                        </div>
-                      </section>
-                    ))}
+                {displayedEvents.map(({ event, isLatest }, index) => (
+                  <section
+                    className={`discussion-row chat-row tone-${getTone(event)} ${
+                      event.type === "revision" ? "is-revision" : ""
+                    } ${isLatest ? "is-latest" : ""}`}
+                    key={`${event.speaker}-${event.round}-${index}`}
+                  >
+                    <div className="discussion-avatar" aria-hidden="true">
+                      {agentIcons[event.speaker]}
+                    </div>
+                    <div className="discussion-bubble">
+                      <div className="discussion-meta">
+                        <span className="discussion-agent">{formatSpeakerName(event)}</span>
+                        <span className="discussion-role">{formatTypeLabel(event)}</span>
+                        {"confidence_before" in event && event.confidence_before !== undefined ? (
+                          <span className="delta-chip revision-delta">
+                            {`${Math.round(event.confidence_before * 100)}% → ${Math.round(
+                              (event.confidence_after ?? event.confidence_before) * 100
+                            )}%`}
+                          </span>
+                        ) : getDisplayedConfidence(event) !== null ? (
+                          <span className="confidence-chip">
+                            {`${Math.round((getDisplayedConfidence(event) ?? 0) * 100)}%`}
+                          </span>
+                        ) : null}
+                      </div>
 
-                    {status !== "done" && (groupedEvents[round] ?? []).length === 0 ? (
-                      <div className="pending-row">このラウンドの発言を待っています…</div>
-                    ) : null}
-                  </div>
-                </section>
-              ))}
+                      <p>{event.message}</p>
+
+                      {formatInfluencedBy(event) ? (
+                        <p className="influence-inline">{formatInfluencedBy(event)}</p>
+                      ) : null}
+                    </div>
+                  </section>
+                ))}
+
+                {status === "streaming" ? <div className="pending-row">次の発言が流れてきます…</div> : null}
+              </div>
             </div>
           </article>
 
@@ -278,10 +280,6 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
               </p>
               <div className="decision-grid">
                 <div className="decision-note">
-                  <span className="summary-label">Next Question</span>
-                  <p>{decision?.next_question ?? "Agent の更新が揃うまで待機中です。"}</p>
-                </div>
-                <div className="decision-note">
                   <span className="summary-label">Decision Basis</span>
                   <p>
                     {decision?.selected_intervention
@@ -291,6 +289,16 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                 </div>
               </div>
             </div>
+          </article>
+
+          <article className="panel next-question-panel">
+            <div className="panel-heading tight">
+              <span className="panel-kicker">Next Question</span>
+              <h3>学習者へ返す次の一問</h3>
+            </div>
+            <p className="next-question-copy">
+              {decision?.next_question ?? "Coach Decision の完了後に、ここへ固定表示されます。"}
+            </p>
           </article>
         </div>
       </section>

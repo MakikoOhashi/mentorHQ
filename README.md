@@ -139,18 +139,22 @@ The coach can then choose a focused check question or integrated retry based on 
 
 ## Phase 1 Static UI
 
-このリポジトリには、Phase 1 用の静的な `Mentor Workspace` 画面を追加しています。
+このリポジトリには、Phase 1 UI を土台にしたローカル版 `Mentor Workspace` を追加しています。
 
 - 左: `Learner / Coach Workspace`
 - 右: `Coach Decision Workspace`
-- すべて固定 mock data
-- API / DB / 認証なし
+- `POST /api/deliberate` で Agent Deliberation を生成
+- `GEMINI_API_KEY` 未設定時は mock fallback で常に動作
+- DB / 認証なし
 
 ### Run
 
 ```bash
 npm install
+cp .env.example .env.local
 npm run dev
 ```
+
+`GEMINI_API_KEY` を `.env.local` に入れると Gemini API を使います。未設定でも mock fallback で起動できます。
 
 その後、[http://localhost:3000](http://localhost:3000) を開いてください。

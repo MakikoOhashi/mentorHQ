@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { generateDeliberation } from "@/lib/deliberation/openai";
+import { generateDeliberation } from "@/lib/deliberation/gemini";
 import type { LearnerCase } from "@/lib/deliberation/types";
 
 export async function POST(request: Request) {

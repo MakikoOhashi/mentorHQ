@@ -1,6 +1,13 @@
 import { AGENTS } from "@/lib/deliberation/agents";
 import type { CoachDecision, DeliberationEvent, DeliberationResponse, LearnerCase } from "@/lib/deliberation/types";
 
+const speakerLabels = {
+  misconception: "誤解仮説エージェント",
+  memory: "記憶参照エージェント",
+  load: "負荷調整エージェント",
+  coach: "コーチ"
+} as const;
+
 export function getDefaultLearnerCase(): LearnerCase {
   return {
     exam: "管理業務主任者試験",
@@ -20,94 +27,53 @@ function getMockEvents(): DeliberationEvent[] {
     {
       round: 1,
       speaker: "misconception",
+      speaker_label: speakerLabels.misconception,
       type: "observation",
-      message:
-        "学習者は『3ヶ月以内』という表現には反応していますが、いつから数えるかを一度も言語化していません。起算点誤認が第一仮説です。",
-      hypothesis: "起算点を『相続の開始があった時』だと機械的に読んでいる",
-      confidence: 0.86,
-      influenced_by: [],
-      recommendation: "起算点を本人の言葉で確認する"
+      message: "3ヶ月は拾えてる。でも、いつからかが抜けてます。",
+      hypothesis: "起算点を機械的に読んでいるかも",
+      confidence_after: 0.86,
+      influenced_by: []
     },
     {
-      round: 1,
+      round: 2,
       speaker: "memory",
-      type: "observation",
-      message:
-        "以前の似たケースでは、期限そのものより『誰がいつ知ったか』の条件が抜け落ちるパターンがありました。今回は再発の匂いがあります。",
-      hypothesis: "期限暗記はあるが、起算条件の想起が弱い",
-      confidence: 0.72,
-      influenced_by: [],
-      recommendation: "条件を説明する前に、起算点を想起させる"
-    },
-    {
-      round: 1,
-      speaker: "load",
-      type: "observation",
-      message:
-        "論点を増やすと観測しにくくなります。まずは『3ヶ月をいつから数えるか』の一点に絞るのが低負荷です。",
-      hypothesis: "長い解説は観測機会を壊す",
-      confidence: 0.91,
-      influenced_by: [],
-      recommendation: "一問だけで切り分ける"
+      speaker_label: speakerLabels.memory,
+      type: "challenge",
+      message: "前も条件を読み飛ばしてたし、今回もその線あります。",
+      hypothesis: "条件句の読み落とし癖もありそう",
+      confidence_after: 0.72,
+      influenced_by: ["misconception"]
     },
     {
       round: 2,
       speaker: "misconception",
+      speaker_label: speakerLabels.misconception,
       type: "revision",
-      message:
-        "Memory Agent の観測を踏まえると、単なる起算点誤認というより『条件句を落とす再発パターン』も含んでいそうです。確信度を少し下げます。",
-      hypothesis: "起算点誤認を中心に、条件見落としが重なっている",
-      confidence: 0.62,
+      message: "なるほど。起算点だけじゃなく条件読み落としも見ます。",
+      hypothesis: "起算点誤認＋条件読み落とし",
       confidence_before: 0.86,
-      confidence_after: 0.62,
-      influenced_by: ["memory"],
-      recommendation: "条件句を言わせる問いに寄せる"
+      confidence_after: 0.68,
+      influenced_by: ["memory"]
     },
     {
-      round: 2,
+      round: 3,
       speaker: "load",
-      type: "revision",
-      message:
-        "Misconception Agent の仮説更新を見ると、なおさら解説先行は避けたいです。両仮説を一問で観測できる形に保つべきです。",
-      hypothesis: "一問で仮説を切り分ける価値が高い",
-      confidence: 0.93,
-      confidence_before: 0.91,
-      confidence_after: 0.93,
-      influenced_by: ["misconception"],
-      recommendation: "起算点の言語化を求める短問を維持する"
-    },
-    {
-      round: 3,
-      speaker: "memory",
+      speaker_label: speakerLabels.load,
       type: "recommendation",
-      message:
-        "再発パターンだとしても、今回は復習説明より先に本人の再構成を促した方が定着しやすいです。",
-      hypothesis: "想起ベース介入が最も再利用性が高い",
-      confidence: 0.76,
-      influenced_by: ["misconception", "load"],
-      recommendation: "starting_point_check を第一候補にする"
-    },
-    {
-      round: 3,
-      speaker: "misconception",
-      type: "recommendation",
-      message:
-        "介入候補は starting_point_check に絞れます。ここで『開始があった時』をそのまま繰り返すなら、誤読が直接観測できます。",
-      hypothesis: "最短観測は starting_point_check",
-      confidence: 0.79,
-      influenced_by: ["memory", "load"],
-      recommendation: "starting_point_check"
+      message: "説明はまだ早いです。まず一問で切り分けましょう。",
+      hypothesis: "一問確認がいちばん軽い",
+      confidence_after: 0.91,
+      influenced_by: ["misconception", "memory"]
     },
     {
       round: 4,
       speaker: "coach",
-      type: "decision",
-      message:
-        "多数決ではなく、最も観測効率が高く低負荷な介入を採用します。今回は起算点確認が、誤解の核と再発パターンの両方を一問で確かめられます。",
-      hypothesis: "説明より前に、起算点の自己言語化を観測するべき",
-      confidence: 0.88,
-      influenced_by: ["misconception", "memory", "load"],
-      recommendation: "starting_point_check"
+      speaker_label: speakerLabels.coach,
+      type: "coach_decision",
+      message: "では起算点確認でいきます。ここがいちばん早いです。",
+      hypothesis: "説明前に起算点を確認する",
+      confidence_after: 0.88,
+      influenced_by: ["misconception", "memory", "load"]
     }
   ];
 }
@@ -115,8 +81,7 @@ function getMockEvents(): DeliberationEvent[] {
 function getMockCoachDecision(): CoachDecision {
   return {
     selected_intervention: "starting_point_check",
-    reason:
-      "Misconception Agent が起算点誤認を主仮説に置きつつ、Memory Agent の再発パターン観測で確信度を調整した。Load Agent も一問で切り分ける方針を支持したため、最短で認識のズレを観測できる。",
+    reason: "起算点のズレか条件読み落としかを、一問で軽く切り分けられるためです。",
     next_question: "その3ヶ月は、いつから数えると思いましたか？"
   };
 }
