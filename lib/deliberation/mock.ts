@@ -29,7 +29,7 @@ function getMockEvents(): DeliberationEvent[] {
       speaker: "misconception",
       speaker_label: speakerLabels.misconception,
       type: "observation",
-      message: "3ヶ月は拾えてる。でも、いつからかが抜けてます。",
+      message: "3ヶ月までは見えてる。起点が抜けてるかも。",
       hypothesis: "起算点を機械的に読んでいるかも",
       confidence_after: 0.86,
       influenced_by: []
@@ -39,7 +39,7 @@ function getMockEvents(): DeliberationEvent[] {
       speaker: "memory",
       speaker_label: speakerLabels.memory,
       type: "challenge",
-      message: "前も条件を読み飛ばしてたし、今回もその線あります。",
+      message: "前も条件を飛ばしてたし、今回もそこ怪しい。",
       hypothesis: "条件句の読み落とし癖もありそう",
       confidence_after: 0.72,
       influenced_by: ["misconception"]
@@ -49,7 +49,7 @@ function getMockEvents(): DeliberationEvent[] {
       speaker: "misconception",
       speaker_label: speakerLabels.misconception,
       type: "revision",
-      message: "なるほど。起算点だけじゃなく条件読み落としも見ます。",
+      message: "それなら見方変わるな。条件抜けも強そう。",
       hypothesis: "起算点誤認＋条件読み落とし",
       confidence_before: 0.86,
       confidence_after: 0.68,
@@ -60,7 +60,7 @@ function getMockEvents(): DeliberationEvent[] {
       speaker: "load",
       speaker_label: speakerLabels.load,
       type: "recommendation",
-      message: "説明はまだ早いです。まず一問で切り分けましょう。",
+      message: "説明より先に、一問だけ当てて切り分けたい。",
       hypothesis: "一問確認がいちばん軽い",
       confidence_after: 0.91,
       influenced_by: ["misconception", "memory"]
@@ -70,7 +70,7 @@ function getMockEvents(): DeliberationEvent[] {
       speaker: "coach",
       speaker_label: speakerLabels.coach,
       type: "coach_decision",
-      message: "では起算点確認でいきます。ここがいちばん早いです。",
+      message: "じゃあ起算点からいこう。そこがいちばん早い。",
       hypothesis: "説明前に起算点を確認する",
       confidence_after: 0.88,
       influenced_by: ["misconception", "memory", "load"]

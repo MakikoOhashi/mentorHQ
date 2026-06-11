@@ -27,14 +27,6 @@ const shortSpeakerLabels: Record<string, string> = {
   coach: "コーチ"
 };
 
-function formatTypeLabel(event: DeliberationEvent) {
-  if (event.type === "observation") return "初期観測";
-  if (event.type === "challenge") return "異議・補強";
-  if (event.type === "revision") return "仮説更新";
-  if (event.type === "recommendation") return "介入提案";
-  return "最終判断";
-}
-
 function formatSpeakerName(event: DeliberationEvent) {
   return shortSpeakerLabels[event.speaker] ?? event.speaker_label;
 }
@@ -47,15 +39,37 @@ function getTone(event: DeliberationEvent) {
   return "support";
 }
 
-function getDisplayedConfidence(event: DeliberationEvent) {
-  return event.confidence_after ?? event.confidence_before ?? null;
+function formatDecisionLabel(value?: string | null) {
+  if (!value) return "Deliberation 完了後に表示されます";
+  if (value === "starting_point_check") return "起算点の確認から入る";
+  if (value === "contrast_check") return "比較でズレをあぶり出す";
+  if (value === "leg_breakdown") return "肢を分けて読み直す";
+  if (value === "integrated_retry") return "理解をまとめて再挑戦する";
+  return value;
 }
 
-function formatInfluencedBy(event: DeliberationEvent) {
-  if (!event.influenced_by?.length) return "";
+function getStreamStatus(status: "idle" | "loading" | "streaming" | "done" | "error") {
+  if (status === "done") {
+    return {
+      kicker: "Decision Reached",
+      title: "Agent Deliberation",
+      pill: "Decision Reached"
+    };
+  }
 
-  const names = event.influenced_by.map((speaker) => shortSpeakerLabels[speaker] ?? speaker);
-  return `${names.join("・")}の指摘を反映`;
+  if (status === "error") {
+    return {
+      kicker: "Deliberation Error",
+      title: "Agent Deliberation",
+      pill: "Error"
+    };
+  }
+
+  return {
+    kicker: "Agent Deliberation",
+    title: "Thinking...",
+    pill: "Thinking..."
+  };
 }
 
 function getEventDelay(index: number) {
@@ -145,6 +159,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     }));
   }, [events]);
 
+  const streamStatus = getStreamStatus(status);
+
   return (
     <main className="page-shell">
       <section className="hero">
@@ -214,24 +230,24 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
           <article className="panel discussion-panel">
             <div className="panel-heading tight discussion-heading">
               <div>
-                <span className="panel-kicker">Deliberation Stream</span>
-                <h3>短い発言が流れる会議ログ</h3>
+                <span className="panel-kicker">{streamStatus.kicker}</span>
+                <h3>{streamStatus.title}</h3>
               </div>
-              <span className="live-pill">
-                {status === "done" ? "Completed" : status === "error" ? "Error" : "Live Deliberation"}
-              </span>
+              <span className="live-pill">{streamStatus.pill}</span>
             </div>
 
             <div className="stream-viewport" ref={streamViewportRef}>
               <div className="discussion-timeline chat-timeline">
                 {displayedEvents.length === 0 ? (
-                  <div className="pending-row">最初の発言を待っています…</div>
+                  <div className="pending-row">会議が立ち上がるのを待っています…</div>
                 ) : null}
 
                 {displayedEvents.map(({ event, isLatest }, index) => (
                   <section
                     className={`discussion-row chat-row tone-${getTone(event)} ${
                       event.type === "revision" ? "is-revision" : ""
+                    } ${event.type === "coach_decision" ? "is-coach-decision" : ""} ${
+                      !isLatest ? "is-aged" : ""
                     } ${isLatest ? "is-latest" : ""}`}
                     key={`${event.speaker}-${event.round}-${index}`}
                   >
@@ -241,30 +257,32 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                     <div className="discussion-bubble">
                       <div className="discussion-meta">
                         <span className="discussion-agent">{formatSpeakerName(event)}</span>
-                        <span className="discussion-role">{formatTypeLabel(event)}</span>
-                        {"confidence_before" in event && event.confidence_before !== undefined ? (
-                          <span className="delta-chip revision-delta">
-                            {`${Math.round(event.confidence_before * 100)}% → ${Math.round(
-                              (event.confidence_after ?? event.confidence_before) * 100
-                            )}%`}
-                          </span>
-                        ) : getDisplayedConfidence(event) !== null ? (
-                          <span className="confidence-chip">
-                            {`${Math.round((getDisplayedConfidence(event) ?? 0) * 100)}%`}
-                          </span>
-                        ) : null}
+                        {event.type === "revision" ? <span className="discussion-role">考えが変わった</span> : null}
                       </div>
 
                       <p>{event.message}</p>
 
-                      {formatInfluencedBy(event) ? (
-                        <p className="influence-inline">{formatInfluencedBy(event)}</p>
+                      {event.type === "revision" &&
+                      event.confidence_before !== undefined &&
+                      event.confidence_after !== undefined ? (
+                        <div className="revision-block" aria-label="confidence revision">
+                          <span className="revision-icon" aria-hidden="true">
+                            🧠
+                          </span>
+                          <span className="delta-chip revision-delta">
+                            {`${Math.round(event.confidence_before * 100)}% → ${Math.round(
+                              event.confidence_after * 100
+                            )}%`}
+                          </span>
+                        </div>
                       ) : null}
                     </div>
                   </section>
                 ))}
 
-                {status === "streaming" ? <div className="pending-row">次の発言が流れてきます…</div> : null}
+                {status === "streaming" || status === "loading" ? (
+                  <div className="pending-row">次のひと言を考えています…</div>
+                ) : null}
               </div>
             </div>
           </article>
@@ -273,21 +291,14 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
             <div className="decision-hero">
               <div>
                 <span className="panel-kicker">Coach Decision</span>
-                <h3>{decision?.selected_intervention ?? "Deliberation 完了後に表示されます"}</h3>
+                <h3>{formatDecisionLabel(decision?.selected_intervention)}</h3>
               </div>
-              <p className="decision-summary">
-                {decision?.reason ?? "Coach が多数決ではなく理由付きで最終介入を決めます。"}
+              <p className="decision-reached-label">
+                {decision ? "Decision Reached" : "議論がまとまるとここに着地します"}
               </p>
-              <div className="decision-grid">
-                <div className="decision-note">
-                  <span className="summary-label">Decision Basis</span>
-                  <p>
-                    {decision?.selected_intervention
-                      ? "Cross-agent revision を踏まえて、最も観測効率の高い介入を採用。"
-                      : "仮説更新・介入候補の絞り込みが進むとここに表示されます。"}
-                  </p>
-                </div>
-              </div>
+              <p className="decision-summary">
+                {decision?.reason ?? "最後にコーチがひとつに決め切ります。"}
+              </p>
             </div>
           </article>
 

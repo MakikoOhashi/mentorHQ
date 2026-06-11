@@ -254,6 +254,7 @@ blockquote {
   padding: 14px 16px;
   background: #fffdfa;
   transition:
+    opacity 180ms ease,
     border-color 180ms ease,
     box-shadow 180ms ease,
     transform 180ms ease;
@@ -307,6 +308,11 @@ blockquote {
   border-color: #d8ebdb;
 }
 
+.is-aged .discussion-bubble,
+.is-aged .discussion-avatar {
+  opacity: 0.62;
+}
+
 .is-revision .discussion-bubble {
   background: linear-gradient(180deg, #f7f8ff, #fdfdff);
   border-color: #cfd8ff;
@@ -320,6 +326,20 @@ blockquote {
 .is-latest .discussion-bubble {
   box-shadow: 0 18px 34px rgba(49, 88, 211, 0.12);
   transform: translateY(-1px);
+  opacity: 1;
+}
+
+.is-latest .discussion-avatar {
+  opacity: 1;
+}
+
+.is-coach-decision .discussion-bubble {
+  background: linear-gradient(180deg, #f5fbf6, #ffffff);
+  border-color: #cae4d0;
+}
+
+.is-coach-decision .discussion-agent {
+  font-size: 1rem;
 }
 
 .decision-panel {
@@ -342,24 +362,19 @@ blockquote {
   color: var(--text);
 }
 
+.decision-reached-label {
+  margin: -4px 0 0;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+
 .reason-inline {
   padding: 14px 16px;
   border-radius: 18px;
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.92);
-}
-
-.decision-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.decision-note {
-  padding: 14px 16px;
-  border-radius: 18px;
-  border: 1px solid rgba(216, 221, 246, 0.9);
-  background: rgba(255, 255, 255, 0.88);
 }
 
 .next-question-panel {
@@ -396,15 +411,6 @@ blockquote {
   font-size: 0.88rem;
 }
 
-.confidence-chip {
-  font-size: 0.68rem;
-  font-weight: 700;
-  color: var(--accent);
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: var(--accent-soft);
-}
-
 .delta-chip {
   font-size: 0.72rem;
   font-weight: 800;
@@ -415,10 +421,20 @@ blockquote {
   border: 1px solid #d7e1ff;
 }
 
-.influence-inline {
-  margin-top: 6px !important;
-  font-size: 0.74rem;
-  color: var(--muted) !important;
+.revision-block {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.revision-icon {
+  font-size: 1.2rem;
+}
+
+.revision-delta {
+  font-size: 1rem;
+  padding: 6px 10px;
 }
 
 .pending-row {
@@ -459,10 +475,6 @@ blockquote {
 
 @media (max-width: 980px) {
   .workspace-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .decision-grid {
     grid-template-columns: 1fr;
   }
 

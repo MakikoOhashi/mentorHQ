@@ -64,7 +64,7 @@ function containsJapanese(text: string): boolean {
 
 function isNaturalMessageLength(text: string): boolean {
   const length = text.trim().length;
-  return length >= 20 && length <= 60;
+  return length >= 15 && length <= 40;
 }
 
 function normalizeSelectedIntervention(value: string): SelectedIntervention {
@@ -380,9 +380,11 @@ function buildPrompt(learnerCase: LearnerCase): string {
 - speaker_label は日本語にし、以下を使う: 誤解仮説エージェント / 記憶参照エージェント / 負荷調整エージェント / コーチ。
 - type は observation, challenge, revision, recommendation, coach_decision のみ許可。
 - message は **必ず日本語**。
-- message は **日本語で 30〜55 文字程度** を目安にする。少し前後してもよいが、長文は禁止。
+- message は **日本語で 15〜40 文字程度** にする。
 - message は **会議での短い発言** にする。自然で少しくだけた口調にする。
 - 「〜を考慮し、仮説を更新します」「〜の可能性があります」など、硬いレポート文体は禁止。
+- 説明口調は禁止。会議で口を挟むひと言の温度にする。
+- speaker_label や Agent 名を、message 本文に書かない。
 - hypothesis は存在する場合 **必ず日本語**。
 - hypothesis は UI にほぼ出ない前提なので、短く雑味なく書く。
 - coach_decision.reason は **必ず日本語**。
