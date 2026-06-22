@@ -1,7 +1,7 @@
 import { AGENTS } from "@/lib/deliberation/agents";
 import { getDeliberationConfig, hasGeminiConfig } from "@/lib/deliberation/config";
 import { buildMockDeliberationResponse } from "@/lib/deliberation/mock";
-import { getLatestMemoryContext } from "@/lib/deliberation/session-memory";
+import { getLatestMemoryContext, getLatestMemorySummary, type MemorySummary } from "@/lib/deliberation/session-memory";
 import type {
   AgentId,
   CoachDecision,
@@ -207,7 +207,28 @@ function normalizeDeliberationEvents(events: DeliberationEvent[]): DeliberationE
   return limited;
 }
 
-function sanitizeResponse(raw: unknown): DeliberationResponse | null {
+function injectMemorySummary(events: DeliberationEvent[], memorySummary: MemorySummary | null): DeliberationEvent[] {
+  if (!memorySummary) {
+    return events;
+  }
+
+  return events.map((event) => {
+    if (event.speaker !== "memory") {
+      return event;
+    }
+
+    if (event.message.includes("前回")) {
+      return event;
+    }
+
+    return {
+      ...event,
+      message: memorySummary.memoryMessageHint
+    };
+  });
+}
+
+function sanitizeResponse(raw: unknown, memorySummary: MemorySummary | null): DeliberationResponse | null {
   if (!raw || typeof raw !== "object") return null;
 
   const candidate = raw as {
@@ -219,10 +240,13 @@ function sanitizeResponse(raw: unknown): DeliberationResponse | null {
     return null;
   }
 
-  const deliberationEvents = normalizeDeliberationEvents(
+  const deliberationEvents = injectMemorySummary(
+    normalizeDeliberationEvents(
     candidate.deliberation_events
     .map((event) => sanitizeEvent(event))
     .filter((event): event is DeliberationEvent => event !== null)
+    ),
+    memorySummary
   );
 
   const coachDecision = sanitizeDecision(candidate.coach_decision);
@@ -434,7 +458,10 @@ ${JSON.stringify(learnerCase, null, 2)}
 export async function generateDeliberation(learnerCase: LearnerCase): Promise<DeliberationResponse> {
   const config = getDeliberationConfig();
   const hasApiKey = hasGeminiConfig(config);
-  const memoryContext = await getLatestMemoryContext();
+  const [memoryContext, memorySummary] = await Promise.all([
+    getLatestMemoryContext(),
+    getLatestMemorySummary()
+  ]);
 
   console.warn("[deliberation][gemini] config", {
     hasApiKey,
@@ -448,7 +475,7 @@ export async function generateDeliberation(learnerCase: LearnerCase): Promise<De
   });
 
   if (!hasApiKey) {
-    return buildMockDeliberationResponse();
+    return buildMockDeliberationResponse(memorySummary);
   }
 
   try {
@@ -491,7 +518,7 @@ export async function generateDeliberation(learnerCase: LearnerCase): Promise<De
         body: truncateForLog(responseBody)
       });
 
-      return buildMockDeliberationResponse();
+      return buildMockDeliberationResponse(memorySummary);
     }
 
     const responseBody = await response.text();
@@ -505,7 +532,7 @@ export async function generateDeliberation(learnerCase: LearnerCase): Promise<De
     });
 
     if (!text) {
-      return buildMockDeliberationResponse();
+      return buildMockDeliberationResponse(memorySummary);
     }
 
     let parsed: unknown;
@@ -521,10 +548,10 @@ export async function generateDeliberation(learnerCase: LearnerCase): Promise<De
         rawText: truncateForLog(text)
       });
 
-      return buildMockDeliberationResponse();
+      return buildMockDeliberationResponse(memorySummary);
     }
 
-    const sanitized = sanitizeResponse(parsed);
+    const sanitized = sanitizeResponse(parsed, memorySummary);
 
     if (!sanitized) {
       console.warn("[deliberation][gemini] sanitizeResponse returned null", getSanitizeFailureDetails(parsed));
@@ -538,7 +565,7 @@ export async function generateDeliberation(learnerCase: LearnerCase): Promise<De
       });
     }
 
-    return sanitized ?? buildMockDeliberationResponse();
+    return sanitized ?? buildMockDeliberationResponse(memorySummary);
   } catch (error) {
     const details = getErrorDetails(error);
 
@@ -547,6 +574,6 @@ export async function generateDeliberation(learnerCase: LearnerCase): Promise<De
       errorMessage: details.message
     });
 
-    return buildMockDeliberationResponse();
+    return buildMockDeliberationResponse(memorySummary);
   }
 }

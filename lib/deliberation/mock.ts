@@ -1,5 +1,6 @@
 import { AGENTS } from "@/lib/deliberation/agents";
 import type { CoachDecision, DeliberationEvent, DeliberationResponse, LearnerCase } from "@/lib/deliberation/types";
+import type { MemorySummary } from "@/lib/deliberation/session-memory";
 
 const speakerLabels = {
   misconception: "誤解仮説エージェント",
@@ -22,7 +23,15 @@ export function getDefaultLearnerCase(): LearnerCase {
   };
 }
 
-function getMockEvents(): DeliberationEvent[] {
+function getMemoryChallengeMessage(memorySummary?: MemorySummary | null): string {
+  if (!memorySummary) {
+    return "前も条件を飛ばしてたし、今回もそこ怪しい。";
+  }
+
+  return memorySummary.memoryMessageHint;
+}
+
+function getMockEvents(memorySummary?: MemorySummary | null): DeliberationEvent[] {
   return [
     {
       round: 1,
@@ -39,7 +48,7 @@ function getMockEvents(): DeliberationEvent[] {
       speaker: "memory",
       speaker_label: speakerLabels.memory,
       type: "challenge",
-      message: "前も条件を飛ばしてたし、今回もそこ怪しい。",
+      message: getMemoryChallengeMessage(memorySummary),
       hypothesis: "条件句の読み落とし癖もありそう",
       confidence_after: 0.72,
       influenced_by: ["misconception"]
@@ -86,12 +95,12 @@ function getMockCoachDecision(): CoachDecision {
   };
 }
 
-export function buildMockDeliberationResponse(): DeliberationResponse {
+export function buildMockDeliberationResponse(memorySummary?: MemorySummary | null): DeliberationResponse {
   void AGENTS;
 
   return {
     mode: "mock",
-    deliberation_events: getMockEvents(),
+    deliberation_events: getMockEvents(memorySummary),
     coach_decision: getMockCoachDecision()
   };
 }

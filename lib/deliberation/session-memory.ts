@@ -16,6 +16,13 @@ export type SessionRecord = {
   created_at?: string | null;
 };
 
+export type MemorySummary = {
+  selectedIntervention: DeliberationResponse["coach_decision"]["selected_intervention"];
+  previousNextQuestion: string | null;
+  previousReason: string | null;
+  memoryMessageHint: string;
+};
+
 type SaveSessionInput = {
   learnerCase: LearnerCase;
   deliberation: DeliberationResponse;
@@ -141,19 +148,17 @@ function toSerializableSession(snapshot: QueryDocumentSnapshot): SessionRecord |
 }
 
 function buildMemoryContext(session: SessionRecord | null): string | null {
-  if (!session) {
+  const summary = buildMemorySummary(session);
+  if (!summary) {
     return null;
   }
 
-  const previousNextQuestion = session.coach_decision.next_question.trim();
-  const previousReason = session.coach_decision.reason.trim();
-  const selectedIntervention = session.coach_decision.selected_intervention;
-
   const lines = [
     "Previous Session Memory",
-    `- selected_intervention: ${selectedIntervention}`,
-    previousNextQuestion ? `- previous_next_question:\n  ${previousNextQuestion}` : null,
-    previousReason ? `- previous_reason:\n  ${previousReason}` : null
+    `- selected_intervention: ${summary.selectedIntervention}`,
+    `- memory_message_hint: ${summary.memoryMessageHint}`,
+    summary.previousNextQuestion ? `- previous_next_question:\n  ${summary.previousNextQuestion}` : null,
+    summary.previousReason ? `- previous_reason:\n  ${summary.previousReason}` : null
   ].filter((line): line is string => Boolean(line));
 
   const memoryContext = lines.length > 1 ? lines.join("\n") : null;
@@ -163,6 +168,23 @@ function buildMemoryContext(session: SessionRecord | null): string | null {
   }
 
   return memoryContext.slice(0, 300);
+}
+
+export function buildMemorySummary(session: SessionRecord | null): MemorySummary | null {
+  if (!session) {
+    return null;
+  }
+
+  const previousNextQuestion = session.coach_decision.next_question.trim() || null;
+  const previousReason = session.coach_decision.reason.trim() || null;
+  const selectedIntervention = session.coach_decision.selected_intervention;
+
+  return {
+    selectedIntervention,
+    previousNextQuestion,
+    previousReason,
+    memoryMessageHint: `前回も ${selectedIntervention} でした。`
+  };
 }
 
 export async function saveDeliberationSession({ learnerCase, deliberation }: SaveSessionInput): Promise<void> {
@@ -217,4 +239,9 @@ export async function getLatestSession(): Promise<SessionRecord | null> {
 export async function getLatestMemoryContext(): Promise<string | null> {
   const session = await getLatestSession();
   return buildMemoryContext(session);
+}
+
+export async function getLatestMemorySummary(): Promise<MemorySummary | null> {
+  const session = await getLatestSession();
+  return buildMemorySummary(session);
 }
