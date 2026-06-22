@@ -45,6 +45,31 @@ function getErrorDetails(error: unknown): { name: string; message: string; stack
   };
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== "object") {
+    return false;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function removeUndefinedDeep<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((item) => removeUndefinedDeep(item)) as T;
+  }
+
+  if (isPlainObject(value)) {
+    const sanitizedEntries = Object.entries(value)
+      .filter(([, entryValue]) => entryValue !== undefined)
+      .map(([key, entryValue]) => [key, removeUndefinedDeep(entryValue)]);
+
+    return Object.fromEntries(sanitizedEntries) as T;
+  }
+
+  return value;
+}
+
 async function getFirestoreClient(): Promise<Firestore | null> {
   if (isFirestoreDisabled()) {
     return null;
@@ -157,16 +182,18 @@ export async function saveDeliberationSession({ learnerCase, deliberation }: Sav
   }
 
   try {
+    const sessionPayload = removeUndefinedDeep({
+      learnerCase,
+      deliberation_events: deliberation.deliberation_events,
+      coach_decision: deliberation.coach_decision,
+      mode: deliberation.mode,
+      created_at: FieldValue.serverTimestamp()
+    });
+
     await firestore
       .collection(SESSIONS_COLLECTION)
       .doc(crypto.randomUUID())
-      .set({
-        learnerCase,
-        deliberation_events: deliberation.deliberation_events,
-        coach_decision: deliberation.coach_decision,
-        mode: deliberation.mode,
-        created_at: FieldValue.serverTimestamp()
-      });
+      .set(sessionPayload);
     console.info("[firestore] session saved");
   } catch (error) {
     console.warn("[firestore] save session skipped", getErrorDetails(error));
