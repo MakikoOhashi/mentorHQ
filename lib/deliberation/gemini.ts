@@ -1,6 +1,7 @@
 import { AGENTS } from "@/lib/deliberation/agents";
 import { getDeliberationConfig, hasGeminiConfig } from "@/lib/deliberation/config";
 import { buildMockDeliberationResponse } from "@/lib/deliberation/mock";
+import { getLatestMemoryContext } from "@/lib/deliberation/session-memory";
 import type {
   AgentId,
   CoachDecision,
@@ -287,7 +288,7 @@ function getSanitizeFailureDetails(raw: unknown) {
   };
 }
 
-function buildPrompt(learnerCase: LearnerCase): string {
+function buildPrompt(learnerCase: LearnerCase, memoryContext?: string | null): string {
   return `あなたは MentorHQ の Agent Deliberation JSON を生成します。
 
 出力は **JSON のみ** にしてください。説明文、前置き、Markdown、コードフェンスは禁止です。
@@ -426,16 +427,20 @@ Agent definitions:
 ${JSON.stringify(AGENTS, null, 2)}
 
 Learner case:
-${JSON.stringify(learnerCase, null, 2)}`;
+${JSON.stringify(learnerCase, null, 2)}
+
+${memoryContext ? `${memoryContext}\n` : ""}`;
 }
 
 export async function generateDeliberation(learnerCase: LearnerCase): Promise<DeliberationResponse> {
   const config = getDeliberationConfig();
   const hasApiKey = hasGeminiConfig(config);
+  const memoryContext = await getLatestMemoryContext();
 
   console.warn("[deliberation][gemini] config", {
     hasApiKey,
-    keyLength: config.apiKey.length
+    keyLength: config.apiKey.length,
+    hasMemoryContext: Boolean(memoryContext)
   });
 
   if (!hasApiKey) {
@@ -460,7 +465,7 @@ export async function generateDeliberation(learnerCase: LearnerCase): Promise<De
               role: "user",
               parts: [
                 {
-                  text: buildPrompt(learnerCase)
+                  text: buildPrompt(learnerCase, memoryContext)
                 }
               ]
             }
