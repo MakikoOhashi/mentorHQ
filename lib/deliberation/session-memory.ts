@@ -140,39 +140,29 @@ function toSerializableSession(snapshot: QueryDocumentSnapshot): SessionRecord |
   };
 }
 
-function getInterventionLabel(selectedIntervention: CoachDecision["selected_intervention"]): string {
-  switch (selectedIntervention) {
-    case "starting_point_check":
-      return "起算点確認";
-    case "contrast_check":
-      return "対比確認";
-    case "leg_breakdown":
-      return "肢ごとの切り分け";
-    case "integrated_retry":
-      return "統合再回答";
-    default:
-      return selectedIntervention;
-  }
-}
-
 function buildMemoryContext(session: SessionRecord | null): string | null {
   if (!session) {
     return null;
   }
 
-  const revisionHypothesis =
-    session.deliberation_events.find((event) => event.type === "revision")?.hypothesis?.trim() ?? "";
-  const theme = session.learnerCase.theme?.trim();
-  const intervention = getInterventionLabel(session.coach_decision.selected_intervention);
+  const previousNextQuestion = session.coach_decision.next_question.trim();
+  const previousReason = session.coach_decision.reason.trim();
+  const selectedIntervention = session.coach_decision.selected_intervention;
 
   const lines = [
-    "Previous Memory:",
-    theme ? `前回テーマ: ${theme}` : null,
-    `前回は ${intervention} で介入した。`,
-    revisionHypothesis ? `誤解仮説は「${revisionHypothesis}」だった。` : null
+    "Previous Session Memory",
+    `- selected_intervention: ${selectedIntervention}`,
+    previousNextQuestion ? `- previous_next_question:\n  ${previousNextQuestion}` : null,
+    previousReason ? `- previous_reason:\n  ${previousReason}` : null
   ].filter((line): line is string => Boolean(line));
 
-  return lines.length > 1 ? lines.join("\n") : null;
+  const memoryContext = lines.length > 1 ? lines.join("\n") : null;
+
+  if (!memoryContext) {
+    return null;
+  }
+
+  return memoryContext.slice(0, 300);
 }
 
 export async function saveDeliberationSession({ learnerCase, deliberation }: SaveSessionInput): Promise<void> {

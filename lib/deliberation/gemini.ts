@@ -291,7 +291,7 @@ function getSanitizeFailureDetails(raw: unknown) {
 function buildPrompt(learnerCase: LearnerCase, memoryContext?: string | null): string {
   return `あなたは MentorHQ の Agent Deliberation JSON を生成します。
 
-出力は **JSON のみ** にしてください。説明文、前置き、Markdown、コードフェンスは禁止です。
+${memoryContext ? `${memoryContext}\n\n` : ""}出力は **JSON のみ** にしてください。説明文、前置き、Markdown、コードフェンスは禁止です。
 
 次の shape に厳密に従ってください:
 {
@@ -428,8 +428,7 @@ ${JSON.stringify(AGENTS, null, 2)}
 
 Learner case:
 ${JSON.stringify(learnerCase, null, 2)}
-
-${memoryContext ? `${memoryContext}\n` : ""}`;
+`;
 }
 
 export async function generateDeliberation(learnerCase: LearnerCase): Promise<DeliberationResponse> {
@@ -441,6 +440,11 @@ export async function generateDeliberation(learnerCase: LearnerCase): Promise<De
     hasApiKey,
     keyLength: config.apiKey.length,
     hasMemoryContext: Boolean(memoryContext)
+  });
+
+  console.log("[deliberation][memory]", {
+    hasMemoryContext: Boolean(memoryContext),
+    memoryLength: memoryContext?.length ?? 0
   });
 
   if (!hasApiKey) {
