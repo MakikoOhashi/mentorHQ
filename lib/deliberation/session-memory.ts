@@ -22,6 +22,7 @@ type SaveSessionInput = {
 const SESSIONS_COLLECTION = "sessions";
 
 let firestoreClientPromise: Promise<FirestoreClient | null> | null = null;
+let firestoreModulePromise: Promise<FirestoreModule | null> | null = null;
 
 type FirestoreTimestampLike = {
   toDate?: () => Date;
@@ -48,16 +49,29 @@ type FirestoreClient = {
   };
 };
 
+type FirestoreConstructor = new (settings?: { projectId?: string }) => FirestoreClient;
+
+type FirestoreFieldValue = {
+  serverTimestamp: () => unknown;
+};
+
+type FirestoreModule = {
+  Firestore: FirestoreConstructor;
+  FieldValue: FirestoreFieldValue;
+  debug: Record<string, unknown>;
+};
+
 function isFirestoreDisabled(): boolean {
   const value = process.env.FIRESTORE_DISABLED?.trim().toLowerCase();
   return value === "true" || value === "1" || value === "yes";
 }
 
-function getErrorDetails(error: unknown): { name: string; message: string } {
+function getErrorDetails(error: unknown): { name: string; message: string; stack?: string } {
   if (error instanceof Error) {
     return {
       name: error.name,
-      message: error.message
+      message: error.message,
+      stack: error.stack
     };
   }
 
@@ -67,6 +81,96 @@ function getErrorDetails(error: unknown): { name: string; message: string } {
   };
 }
 
+function isFirestoreConstructor(value: unknown): value is FirestoreConstructor {
+  return typeof value === "function";
+}
+
+function hasServerTimestamp(value: unknown): value is FirestoreFieldValue {
+  return typeof value === "object" && value !== null && typeof (value as FirestoreFieldValue).serverTimestamp === "function";
+}
+
+function describeFirestoreImportShape(moduleValue: unknown): Record<string, unknown> {
+  if (!moduleValue || typeof moduleValue !== "object") {
+    return { moduleType: typeof moduleValue };
+  }
+
+  const moduleRecord = moduleValue as Record<string, unknown>;
+  const defaultExport =
+    moduleRecord.default && typeof moduleRecord.default === "object"
+      ? (moduleRecord.default as Record<string, unknown>)
+      : null;
+
+  return {
+    moduleType: typeof moduleValue,
+    moduleKeys: Object.keys(moduleRecord).sort(),
+    defaultType: typeof moduleRecord.default,
+    defaultKeys: defaultExport ? Object.keys(defaultExport).sort() : [],
+    firestoreExportType: typeof moduleRecord.Firestore,
+    defaultFirestoreExportType: typeof defaultExport?.Firestore,
+    fieldValueExportType: typeof moduleRecord.FieldValue,
+    defaultFieldValueExportType: typeof defaultExport?.FieldValue
+  };
+}
+
+async function loadFirestoreModule(): Promise<FirestoreModule | null> {
+  if (isFirestoreDisabled()) {
+    return null;
+  }
+
+  if (!firestoreModulePromise) {
+    firestoreModulePromise = (async () => {
+      try {
+        const moduleValue = await import("@google-cloud/firestore");
+        const importShape = describeFirestoreImportShape(moduleValue);
+        const moduleRecord = moduleValue as Record<string, unknown>;
+        const defaultExport =
+          moduleRecord.default && typeof moduleRecord.default === "object"
+            ? (moduleRecord.default as Record<string, unknown>)
+            : null;
+
+        const FirestoreExport = isFirestoreConstructor(moduleRecord.Firestore)
+          ? moduleRecord.Firestore
+          : isFirestoreConstructor(defaultExport?.Firestore)
+            ? defaultExport.Firestore
+            : isFirestoreConstructor(moduleRecord.default)
+              ? moduleRecord.default
+              : null;
+
+        const FieldValueExport = hasServerTimestamp(moduleRecord.FieldValue)
+          ? moduleRecord.FieldValue
+          : hasServerTimestamp(defaultExport?.FieldValue)
+            ? defaultExport.FieldValue
+            : null;
+
+        console.info("[firestore] import resolved", {
+          ...importShape,
+          resolvedFirestoreCtor: FirestoreExport?.name ?? null,
+          resolvedFieldValue: Boolean(FieldValueExport)
+        });
+
+        if (!FirestoreExport || !FieldValueExport) {
+          throw new TypeError("Unable to resolve Firestore exports from @google-cloud/firestore");
+        }
+
+        return {
+          Firestore: FirestoreExport,
+          FieldValue: FieldValueExport,
+          debug: {
+            ...importShape,
+            resolvedFirestoreCtor: FirestoreExport.name ?? null,
+            resolvedFieldValue: true
+          }
+        };
+      } catch (error) {
+        console.warn("[firestore] module import skipped", getErrorDetails(error));
+        return null;
+      }
+    })();
+  }
+
+  return firestoreModulePromise;
+}
+
 async function getFirestoreClient(): Promise<FirestoreClient | null> {
   if (isFirestoreDisabled()) {
     return null;
@@ -74,18 +178,35 @@ async function getFirestoreClient(): Promise<FirestoreClient | null> {
 
   if (!firestoreClientPromise) {
     firestoreClientPromise = (async () => {
-      try {
-        const { Firestore } = await import("@google-cloud/firestore");
+      const firestoreModule = await loadFirestoreModule();
+      if (!firestoreModule) {
+        return null;
+      }
 
-        return new Firestore({
-          projectId:
-            process.env.FIRESTORE_PROJECT_ID?.trim() ||
-            process.env.GOOGLE_CLOUD_PROJECT?.trim() ||
-            process.env.GCLOUD_PROJECT?.trim() ||
-            undefined
-        }) as unknown as FirestoreClient;
+      const projectId =
+        process.env.FIRESTORE_PROJECT_ID?.trim() ||
+        process.env.GOOGLE_CLOUD_PROJECT?.trim() ||
+        process.env.GCLOUD_PROJECT?.trim() ||
+        undefined;
+
+      try {
+        const client = new firestoreModule.Firestore({
+          projectId
+        });
+
+        console.info("[firestore] client init ok", {
+          projectId: projectId ?? null,
+          ctorName: firestoreModule.debug.resolvedFirestoreCtor ?? null,
+          importBranch: firestoreModule.debug
+        });
+
+        return client;
       } catch (error) {
-        console.warn("[firestore] client init skipped", getErrorDetails(error));
+        console.warn("[firestore] client init skipped", {
+          ...getErrorDetails(error),
+          projectId: projectId ?? null,
+          importBranch: firestoreModule.debug
+        });
         return null;
       }
     })();
@@ -162,13 +283,12 @@ function buildMemoryContext(session: SessionRecord | null): string | null {
 
 export async function saveDeliberationSession({ learnerCase, deliberation }: SaveSessionInput): Promise<void> {
   const firestore = await getFirestoreClient();
-  if (!firestore) {
+  const firestoreModule = await loadFirestoreModule();
+  if (!firestore || !firestoreModule) {
     return;
   }
 
   try {
-    const { FieldValue } = await import("@google-cloud/firestore");
-
     await firestore
       .collection(SESSIONS_COLLECTION)
       .doc(crypto.randomUUID())
@@ -177,7 +297,7 @@ export async function saveDeliberationSession({ learnerCase, deliberation }: Sav
         deliberation_events: deliberation.deliberation_events,
         coach_decision: deliberation.coach_decision,
         mode: deliberation.mode,
-        created_at: FieldValue.serverTimestamp()
+        created_at: firestoreModule.FieldValue.serverTimestamp()
       });
   } catch (error) {
     console.warn("[firestore] save session skipped", getErrorDetails(error));
