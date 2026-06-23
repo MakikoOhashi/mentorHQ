@@ -13,6 +13,7 @@ export type SessionRecord = {
   deliberation_events: DeliberationEvent[];
   coach_decision: CoachDecision;
   mode: DeliberationResponse["mode"];
+  misunderstanding_type?: string | null;
   created_at?: string | null;
 };
 
@@ -20,8 +21,16 @@ export type MemorySummary = {
   selectedIntervention: DeliberationResponse["coach_decision"]["selected_intervention"];
   previousNextQuestion: string | null;
   previousReason: string | null;
+  recentInterventions: DeliberationResponse["coach_decision"]["selected_intervention"][];
+  repeatedInterventionCount: number;
+  repeatedPatternDetected: boolean;
+  recentMisunderstandings: string[];
+  repeatedMisunderstandingDetected: boolean;
+  mostRepeatedMisunderstanding: string | null;
   memoryMessageHint: string;
 };
+
+type MisunderstandingType = "starting_point_confusion" | "condition_omission" | "unknown";
 
 type SaveSessionInput = {
   learnerCase: LearnerCase;
@@ -29,6 +38,72 @@ type SaveSessionInput = {
 };
 
 const SESSIONS_COLLECTION = "sessions";
+const RECENT_SESSION_LIMIT = 5;
+
+function getInterventionLabel(intervention: DeliberationResponse["coach_decision"]["selected_intervention"]): string {
+  switch (intervention) {
+    case "starting_point_check":
+      return "起算点確認";
+    case "contrast_check":
+      return "比較確認";
+    case "integrated_retry":
+      return "統合リトライ";
+    case "leg_breakdown":
+      return "脚分解";
+    default:
+      return intervention;
+  }
+}
+
+function getMisunderstandingLabel(misunderstandingType: string | null): string {
+  switch (misunderstandingType) {
+    case "starting_point_confusion":
+      return "起算点の誤解";
+    case "condition_omission":
+      return "条件の読み落とし";
+    case "unknown":
+      return "誤解パターン";
+    default:
+      return misunderstandingType ?? "誤解パターン";
+  }
+}
+
+function eventTexts(deliberationEvents: DeliberationEvent[]): string {
+  return deliberationEvents
+    .filter((event) => event.speaker === "misconception" || event.type === "revision")
+    .map((event) => `${event.hypothesis ?? ""} ${event.message}`)
+    .join(" ")
+    .toLowerCase();
+}
+
+function detectMisunderstandingTypeFromParts(
+  coachDecision: CoachDecision,
+  deliberationEvents: DeliberationEvent[]
+): MisunderstandingType {
+  const text = eventTexts(deliberationEvents);
+  const startingPointCueCount = [
+    coachDecision.selected_intervention === "starting_point_check" || false,
+    /起算点/g.test(text),
+    /いつから/g.test(text),
+    /知った時/g.test(text)
+  ].filter(Boolean).length;
+  const conditionCueCount = [/条件/g.test(text), /読み落とし/g.test(text), /見落とし/g.test(text)].filter(Boolean)
+    .length;
+
+  if (conditionCueCount >= 2) {
+    return "condition_omission";
+  }
+
+  if (startingPointCueCount >= 1) {
+    return "starting_point_confusion";
+  }
+
+  if (conditionCueCount >= 1) {
+    return "condition_omission";
+  }
+
+  return "unknown";
+}
 
 let firestorePromise: Promise<Firestore | null> | null = null;
 
@@ -143,12 +218,39 @@ function toSerializableSession(snapshot: QueryDocumentSnapshot): SessionRecord |
     deliberation_events: data.deliberation_events as DeliberationEvent[],
     coach_decision: data.coach_decision as CoachDecision,
     mode: (data.mode as DeliberationResponse["mode"]) ?? "mock",
+    misunderstanding_type:
+      typeof data.misunderstanding_type === "string"
+        ? data.misunderstanding_type
+        : detectMisunderstandingTypeFromParts(
+            data.coach_decision as CoachDecision,
+            data.deliberation_events as DeliberationEvent[]
+          ),
     created_at: toSerializableCreatedAt(data.created_at)
   };
 }
 
-function buildMemoryContext(session: SessionRecord | null): string | null {
-  const summary = buildMemorySummary(session);
+function formatCounts(items: string[]): string[] {
+  const counts = items.reduce<Map<string, number>>((countMap, item) => {
+    countMap.set(item, (countMap.get(item) ?? 0) + 1);
+    return countMap;
+  }, new Map());
+
+  return Array.from(counts.entries()).map(([item, count]) => `- ${getMisunderstandingLabel(item)} x${count}`);
+}
+
+function formatRecentInterventions(recentInterventions: MemorySummary["recentInterventions"]): string[] {
+  const interventionCounts = recentInterventions.reduce<Map<string, number>>((counts, intervention) => {
+    counts.set(intervention, (counts.get(intervention) ?? 0) + 1);
+    return counts;
+  }, new Map());
+
+  return Array.from(interventionCounts.entries()).map(
+    ([intervention, count]) => `- ${intervention} x${count}`
+  );
+}
+
+function buildMemoryContext(sessions: SessionRecord[]): string | null {
+  const summary = buildMemorySummary(sessions);
   if (!summary) {
     return null;
   }
@@ -157,6 +259,16 @@ function buildMemoryContext(session: SessionRecord | null): string | null {
     "Previous Session Memory",
     `- selected_intervention: ${summary.selectedIntervention}`,
     `- memory_message_hint: ${summary.memoryMessageHint}`,
+    "",
+    "Recent Memory Pattern",
+    ...formatRecentInterventions(summary.recentInterventions),
+    `- repeated_intervention_count: ${summary.repeatedInterventionCount}`,
+    `- repeated_pattern_detected: ${summary.repeatedPatternDetected}`,
+    "",
+    "Recent Misunderstanding Pattern",
+    ...formatCounts(summary.recentMisunderstandings),
+    `- most_repeated_misunderstanding: ${summary.mostRepeatedMisunderstanding ?? "unknown"}`,
+    `- repeated_misunderstanding_detected: ${summary.repeatedMisunderstandingDetected}`,
     summary.previousNextQuestion ? `- previous_next_question:\n  ${summary.previousNextQuestion}` : null,
     summary.previousReason ? `- previous_reason:\n  ${summary.previousReason}` : null
   ].filter((line): line is string => Boolean(line));
@@ -170,20 +282,74 @@ function buildMemoryContext(session: SessionRecord | null): string | null {
   return memoryContext.slice(0, 300);
 }
 
-export function buildMemorySummary(session: SessionRecord | null): MemorySummary | null {
-  if (!session) {
+function buildMemoryMessageHint(summary: Omit<MemorySummary, "memoryMessageHint">): string {
+  if (summary.repeatedMisunderstandingDetected && summary.mostRepeatedMisunderstanding) {
+    const misunderstandingLabel = getMisunderstandingLabel(summary.mostRepeatedMisunderstanding);
+    if (summary.mostRepeatedMisunderstanding === "starting_point_confusion") {
+      return `${misunderstandingLabel}が続いてますね。前回もここで迷ってました。`;
+    }
+
+    return `${misunderstandingLabel}が続いてますね。誤解パターンの再発かも。`;
+  }
+
+  const interventionLabel = getInterventionLabel(summary.selectedIntervention);
+
+  if (summary.repeatedPatternDetected) {
+    if (summary.repeatedInterventionCount >= 3) {
+      return `${interventionLabel} が続いてますね。似た誤解かも。`;
+    }
+
+    return `前回も ${interventionLabel} でした。同じ介入が続いてます。`;
+  }
+
+  return `前回も ${interventionLabel} でした。`;
+}
+
+export function buildMemorySummary(sessions: SessionRecord[]): MemorySummary | null {
+  const [latestSession] = sessions;
+  if (!latestSession) {
     return null;
   }
 
-  const previousNextQuestion = session.coach_decision.next_question.trim() || null;
-  const previousReason = session.coach_decision.reason.trim() || null;
-  const selectedIntervention = session.coach_decision.selected_intervention;
+  const previousNextQuestion = latestSession.coach_decision.next_question.trim() || null;
+  const previousReason = latestSession.coach_decision.reason.trim() || null;
+  const recentInterventions = sessions
+    .map((session) => session.coach_decision.selected_intervention)
+    .filter((value): value is MemorySummary["selectedIntervention"] => Boolean(value));
+  const selectedIntervention = recentInterventions[0] ?? latestSession.coach_decision.selected_intervention;
+  const repeatedInterventionCount = recentInterventions.filter(
+    (intervention) => intervention === selectedIntervention
+  ).length;
+  const repeatedPatternDetected = repeatedInterventionCount >= 2;
+  const recentMisunderstandings = sessions
+    .map((session) => session.misunderstanding_type ?? "unknown")
+    .filter((value) => value !== "");
+  const misunderstandingCounts = recentMisunderstandings.reduce<Map<string, number>>((counts, misunderstanding) => {
+    counts.set(misunderstanding, (counts.get(misunderstanding) ?? 0) + 1);
+    return counts;
+  }, new Map());
+  const mostRepeatedMisunderstanding =
+    Array.from(misunderstandingCounts.entries()).sort((left, right) => right[1] - left[1])[0]?.[0] ?? null;
+  const repeatedMisunderstandingDetected =
+    mostRepeatedMisunderstanding !== null &&
+    mostRepeatedMisunderstanding !== "unknown" &&
+    (misunderstandingCounts.get(mostRepeatedMisunderstanding) ?? 0) >= 2;
 
-  return {
+  const summaryBase = {
     selectedIntervention,
     previousNextQuestion,
     previousReason,
-    memoryMessageHint: `前回も ${selectedIntervention} でした。`
+    recentInterventions,
+    repeatedInterventionCount,
+    repeatedPatternDetected,
+    recentMisunderstandings,
+    repeatedMisunderstandingDetected,
+    mostRepeatedMisunderstanding
+  };
+
+  return {
+    ...summaryBase,
+    memoryMessageHint: buildMemoryMessageHint(summaryBase)
   };
 }
 
@@ -198,6 +364,10 @@ export async function saveDeliberationSession({ learnerCase, deliberation }: Sav
       learnerCase,
       deliberation_events: deliberation.deliberation_events,
       coach_decision: deliberation.coach_decision,
+      misunderstanding_type: detectMisunderstandingTypeFromParts(
+        deliberation.coach_decision,
+        deliberation.deliberation_events
+      ),
       mode: deliberation.mode,
       created_at: FieldValue.serverTimestamp()
     });
@@ -212,36 +382,49 @@ export async function saveDeliberationSession({ learnerCase, deliberation }: Sav
   }
 }
 
-export async function getLatestSession(): Promise<SessionRecord | null> {
+export async function getRecentSessions(limit = RECENT_SESSION_LIMIT): Promise<SessionRecord[]> {
   const firestore = await getFirestoreClient();
   if (!firestore) {
-    return null;
+    return [];
   }
 
   try {
-    const snapshot = await firestore.collection(SESSIONS_COLLECTION).orderBy("created_at", "desc").limit(1).get();
+    const snapshot = await firestore
+      .collection(SESSIONS_COLLECTION)
+      .orderBy("created_at", "desc")
+      .limit(limit)
+      .get();
 
     if (snapshot.empty) {
-      return null;
+      return [];
     }
 
-    const session = toSerializableSession(snapshot.docs[0]);
-    if (session) {
-      console.info("[firestore] latest session loaded");
+    const sessions = snapshot.docs
+      .map((sessionSnapshot) => toSerializableSession(sessionSnapshot))
+      .filter((session): session is SessionRecord => session !== null);
+
+    if (sessions.length > 0) {
+      console.info("[firestore] recent sessions loaded", { count: sessions.length });
     }
-    return session;
+
+    return sessions;
   } catch (error) {
-    console.warn("[firestore] latest session lookup skipped", getErrorDetails(error));
-    return null;
+    console.warn("[firestore] recent sessions lookup skipped", getErrorDetails(error));
+    return [];
   }
 }
 
+export async function getLatestSession(): Promise<SessionRecord | null> {
+  const [session] = await getRecentSessions(1);
+  return session ?? null;
+}
+
 export async function getLatestMemoryContext(): Promise<string | null> {
-  const session = await getLatestSession();
-  return buildMemoryContext(session);
+  const sessions = await getRecentSessions();
+  return buildMemoryContext(sessions);
 }
 
 export async function getLatestMemorySummary(): Promise<MemorySummary | null> {
-  const session = await getLatestSession();
-  return buildMemorySummary(session);
+  const sessions = await getRecentSessions();
+  return buildMemorySummary(sessions);
 }
