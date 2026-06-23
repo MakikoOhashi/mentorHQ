@@ -189,7 +189,9 @@ blockquote {
 
 .discussion-panel {
   padding: 22px;
-  background: linear-gradient(180deg, #ffffff, #fcfcff);
+  background:
+    radial-gradient(circle at top, rgba(49, 88, 211, 0.08), transparent 34%),
+    linear-gradient(180deg, #ffffff, #fcfcff);
 }
 
 .discussion-heading {
@@ -200,28 +202,49 @@ blockquote {
 }
 
 .discussion-timeline {
-  display: grid;
-  gap: 14px;
-  margin-top: 18px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 12px;
+  min-height: 100%;
 }
 
 .stream-viewport {
   margin-top: 18px;
-  max-height: 780px;
-  overflow-y: auto;
-  padding-right: 6px;
-  scroll-behavior: smooth;
+  position: relative;
+  height: 520px;
+  overflow: hidden;
+  padding: 8px 4px 10px;
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, rgba(248, 246, 239, 0.88), rgba(255, 255, 255, 0.72)),
+    rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(233, 226, 211, 0.8);
+}
+
+.stream-viewport::before,
+.stream-viewport::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 72px;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.stream-viewport::before {
+  top: 0;
+  background: linear-gradient(180deg, rgba(248, 246, 239, 1), rgba(248, 246, 239, 0));
 }
 
 .stream-viewport::after {
-  content: "";
-  display: block;
-  height: 10px;
+  bottom: 0;
+  background: linear-gradient(0deg, rgba(252, 251, 247, 0.92), rgba(252, 251, 247, 0));
 }
 
 .chat-timeline {
   margin-top: 0;
-  align-content: start;
 }
 
 .discussion-row {
@@ -233,8 +256,9 @@ blockquote {
 
 .chat-row {
   opacity: 0;
-  transform: translateY(10px);
-  animation: chat-enter 320ms ease forwards;
+  transform: translateY(18px) scale(0.985);
+  transform-origin: bottom center;
+  animation: stream-enter 420ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
 }
 
 .discussion-avatar {
@@ -254,10 +278,11 @@ blockquote {
   padding: 14px 16px;
   background: #fffdfa;
   transition:
-    opacity 180ms ease,
-    border-color 180ms ease,
-    box-shadow 180ms ease,
-    transform 180ms ease;
+    opacity 260ms ease,
+    border-color 260ms ease,
+    box-shadow 260ms ease,
+    transform 260ms ease,
+    filter 260ms ease;
 }
 
 .discussion-meta {
@@ -308,29 +333,61 @@ blockquote {
   border-color: #d8ebdb;
 }
 
-.is-aged .discussion-bubble,
-.is-aged .discussion-avatar {
-  opacity: 0.62;
-}
-
 .is-revision .discussion-bubble {
-  background: linear-gradient(180deg, #f7f8ff, #fdfdff);
-  border-color: #cfd8ff;
+  background: linear-gradient(180deg, #f3f6ff, #ffffff);
+  border-color: #bfcfff;
+  box-shadow: 0 14px 30px rgba(49, 88, 211, 0.12);
 }
 
 .is-revision .discussion-avatar {
-  background: #eef2ff;
-  border-color: #d4dcff;
+  background: linear-gradient(180deg, #eef2ff, #f9faff);
+  border-color: #cbd7ff;
 }
 
 .is-latest .discussion-bubble {
-  box-shadow: 0 18px 34px rgba(49, 88, 211, 0.12);
-  transform: translateY(-1px);
+  box-shadow: 0 22px 38px rgba(49, 88, 211, 0.18);
+  transform: translateY(-2px) scale(1.01);
   opacity: 1;
 }
 
 .is-latest .discussion-avatar {
   opacity: 1;
+  transform: scale(1.04);
+}
+
+.is-previous .discussion-bubble,
+.is-previous .discussion-avatar {
+  opacity: 0.82;
+}
+
+.is-exiting {
+  animation: stream-exit 420ms ease forwards;
+}
+
+.stream-depth-0 .discussion-bubble,
+.stream-depth-0 .discussion-avatar {
+  opacity: 1;
+  filter: saturate(1);
+}
+
+.stream-depth-1 .discussion-bubble,
+.stream-depth-1 .discussion-avatar {
+  opacity: 0.82;
+}
+
+.stream-depth-2 .discussion-bubble,
+.stream-depth-2 .discussion-avatar {
+  opacity: 0.66;
+}
+
+.stream-depth-3 .discussion-bubble,
+.stream-depth-3 .discussion-avatar {
+  opacity: 0.5;
+}
+
+.stream-depth-4 .discussion-bubble,
+.stream-depth-4 .discussion-avatar {
+  opacity: 0.34;
 }
 
 .is-coach-decision .discussion-bubble {
@@ -424,12 +481,20 @@ blockquote {
 .revision-block {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
   margin-top: 12px;
 }
 
 .revision-icon {
   font-size: 1.2rem;
+}
+
+.revision-shift {
+  font-size: 0.76rem;
+  font-weight: 800;
+  color: #2141a8;
+  letter-spacing: 0.06em;
 }
 
 .revision-delta {
@@ -442,8 +507,9 @@ blockquote {
   border-radius: 16px;
   padding: 12px 14px;
   color: var(--muted);
-  background: var(--surface-soft);
+  background: rgba(248, 246, 239, 0.88);
   font-size: 0.9rem;
+  backdrop-filter: blur(6px);
 }
 
 .primary-button {
@@ -486,6 +552,10 @@ blockquote {
     justify-content: flex-start;
     max-width: none;
   }
+
+  .stream-viewport {
+    height: 440px;
+  }
 }
 
 .next-question-copy {
@@ -496,14 +566,25 @@ blockquote {
   line-height: 1.65;
 }
 
-@keyframes chat-enter {
+@keyframes stream-enter {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(18px) scale(0.985);
   }
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes stream-exit {
+  from {
+    opacity: 0.34;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-30px) scale(0.96);
   }
 }
 

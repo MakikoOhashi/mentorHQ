@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type {
   CoachDecision,
@@ -11,6 +11,12 @@ import type {
 
 type CoachWorkspaceProps = {
   initialCase: LearnerCase;
+};
+
+type StreamEvent = {
+  id: string;
+  event: DeliberationEvent;
+  phase: "live" | "exiting";
 };
 
 const agentIcons: Record<string, string> = {
@@ -72,19 +78,37 @@ function getStreamStatus(status: "idle" | "loading" | "streaming" | "done" | "er
   };
 }
 
-function getEventDelay(index: number) {
-  return index * 1050 + Math.floor(Math.random() * 301);
+const EVENT_DURATIONS: Record<DeliberationEvent["type"], number> = {
+  observation: 1500,
+  challenge: 2000,
+  revision: 2500,
+  recommendation: 2000,
+  coach_decision: 3000
+};
+
+const MAX_VISIBLE_EVENTS = 5;
+const EXIT_ANIMATION_MS = 420;
+
+function getCumulativeEventDelay(events: DeliberationEvent[], index: number) {
+  let total = 350;
+
+  for (let currentIndex = 0; currentIndex <= index; currentIndex += 1) {
+    total += EVENT_DURATIONS[events[currentIndex].type];
+  }
+
+  return total;
 }
 
 export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const [learnerCase] = useState(initialCase);
   const [events, setEvents] = useState<DeliberationEvent[]>([]);
+  const [streamEvents, setStreamEvents] = useState<StreamEvent[]>([]);
   const [decision, setDecision] = useState<CoachDecision | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "streaming" | "done" | "error">("idle");
   const [mode, setMode] = useState<"mock" | "ai">("mock");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const timeoutIdsRef = useRef<number[]>([]);
-  const streamViewportRef = useRef<HTMLDivElement | null>(null);
+  const sequenceRef = useRef(0);
 
   const clearScheduledUpdates = useCallback(() => {
     timeoutIdsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
@@ -95,8 +119,10 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     clearScheduledUpdates();
     setStatus("loading");
     setEvents([]);
+    setStreamEvents([]);
     setDecision(null);
     setErrorMessage(null);
+    sequenceRef.current = 0;
 
     try {
       const response = await fetch("/api/deliberate", {
@@ -118,6 +144,28 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       payload.deliberation_events.forEach((event, index) => {
         const timeoutId = window.setTimeout(() => {
           setEvents((current) => [...current, event]);
+          sequenceRef.current += 1;
+
+          const streamId = `${event.speaker}-${event.round}-${sequenceRef.current}`;
+          setStreamEvents((current) => {
+            const next = [...current, { id: streamId, event, phase: "live" as const }];
+
+            if (next.length > MAX_VISIBLE_EVENTS) {
+              const oldestLiveIndex = next.findIndex((item) => item.phase === "live");
+
+              if (oldestLiveIndex >= 0) {
+                const exitingId = next[oldestLiveIndex].id;
+                next[oldestLiveIndex] = { ...next[oldestLiveIndex], phase: "exiting" };
+
+                const removalTimeoutId = window.setTimeout(() => {
+                  setStreamEvents((rendered) => rendered.filter((item) => item.id !== exitingId));
+                }, EXIT_ANIMATION_MS);
+                timeoutIdsRef.current.push(removalTimeoutId);
+              }
+            }
+
+            return next;
+          });
 
           if (index === payload.deliberation_events.length - 1) {
             const decisionTimeoutId = window.setTimeout(() => {
@@ -126,7 +174,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
             }, 220);
             timeoutIdsRef.current.push(decisionTimeoutId);
           }
-        }, getEventDelay(index));
+        }, getCumulativeEventDelay(payload.deliberation_events, index));
         timeoutIdsRef.current.push(timeoutId);
       });
     } catch (error) {
@@ -142,22 +190,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     };
   }, [clearScheduledUpdates, runDeliberation]);
 
-  useEffect(() => {
-    const viewport = streamViewportRef.current;
-    if (!viewport) return;
-
-    viewport.scrollTo({
-      top: viewport.scrollHeight,
-      behavior: status === "streaming" ? "smooth" : "auto"
-    });
-  }, [events, status]);
-
-  const displayedEvents = useMemo(() => {
-    return events.map((event, index) => ({
-      event,
-      isLatest: index === events.length - 1
-    }));
-  }, [events]);
+  const visibleLiveCount = streamEvents.filter((item) => item.phase !== "exiting").length;
 
   const streamStatus = getStreamStatus(status);
 
@@ -236,20 +269,31 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
               <span className="live-pill">{streamStatus.pill}</span>
             </div>
 
-            <div className="stream-viewport" ref={streamViewportRef}>
+            <div className="stream-viewport">
               <div className="discussion-timeline chat-timeline">
-                {displayedEvents.length === 0 ? (
+                {streamEvents.length === 0 ? (
                   <div className="pending-row">会議が立ち上がるのを待っています…</div>
                 ) : null}
 
-                {displayedEvents.map(({ event, isLatest }, index) => (
+                {streamEvents.map(({ id, event, phase }, index) => {
+                  const liveIndex = streamEvents
+                    .filter((item) => item.phase !== "exiting")
+                    .findIndex((item) => item.id === id);
+                  const age = liveIndex >= 0 ? visibleLiveCount - liveIndex - 1 : MAX_VISIBLE_EVENTS;
+                  const isLatest = phase !== "exiting" && age === 0;
+                  const isPrevious = phase !== "exiting" && age === 1;
+
+                  return (
                   <section
                     className={`discussion-row chat-row tone-${getTone(event)} ${
                       event.type === "revision" ? "is-revision" : ""
                     } ${event.type === "coach_decision" ? "is-coach-decision" : ""} ${
-                      !isLatest ? "is-aged" : ""
-                    } ${isLatest ? "is-latest" : ""}`}
-                    key={`${event.speaker}-${event.round}-${index}`}
+                      phase === "exiting" ? "is-exiting" : ""
+                    } ${isLatest ? "is-latest" : ""} ${isPrevious ? "is-previous" : ""} stream-depth-${Math.min(
+                      age,
+                      MAX_VISIBLE_EVENTS - 1
+                    )}`}
+                    key={id}
                   >
                     <div className="discussion-avatar" aria-hidden="true">
                       {agentIcons[event.speaker]}
@@ -269,6 +313,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                           <span className="revision-icon" aria-hidden="true">
                             🧠
                           </span>
+                          <span className="revision-shift">見解更新</span>
                           <span className="delta-chip revision-delta">
                             {`${Math.round(event.confidence_before * 100)}% → ${Math.round(
                               event.confidence_after * 100
@@ -278,7 +323,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                       ) : null}
                     </div>
                   </section>
-                ))}
+                  );
+                })}
 
                 {status === "streaming" || status === "loading" ? (
                   <div className="pending-row">次のひと言を考えています…</div>
