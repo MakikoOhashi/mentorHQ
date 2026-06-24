@@ -1,5 +1,8 @@
 import type {
   CoachDecision,
+  DailyReviewStatus,
+  DailySession,
+  DailySessionStatus,
   DeliberationEvent,
   DeliberationResponse,
   LearnerCase
@@ -37,7 +40,16 @@ type SaveSessionInput = {
   deliberation: DeliberationResponse;
 };
 
+export type SaveDailySessionInput = {
+  questionIds: string[];
+  status?: DailySessionStatus;
+  currentIndex?: number;
+  observationCount?: number;
+  reviewStatus?: DailyReviewStatus;
+};
+
 const SESSIONS_COLLECTION = "sessions";
+const DAILY_SESSIONS_COLLECTION = "daily_sessions";
 const RECENT_SESSION_LIMIT = 5;
 
 function getInterventionLabel(intervention: DeliberationResponse["coach_decision"]["selected_intervention"]): string {
@@ -229,6 +241,32 @@ function toSerializableSession(snapshot: QueryDocumentSnapshot): SessionRecord |
   };
 }
 
+function toSerializableDailySession(snapshot: QueryDocumentSnapshot): DailySession | null {
+  const data = snapshot.data();
+
+  if (!Array.isArray(data.question_ids)) {
+    return null;
+  }
+
+  return {
+    id: snapshot.id,
+    created_at: toSerializableCreatedAt(data.created_at),
+    status: isDailySessionStatus(data.status) ? data.status : "draft",
+    question_ids: data.question_ids.filter((value: unknown): value is string => typeof value === "string"),
+    current_index: typeof data.current_index === "number" ? data.current_index : 0,
+    observation_count: typeof data.observation_count === "number" ? data.observation_count : 0,
+    review_status: isDailyReviewStatus(data.review_status) ? data.review_status : "pending"
+  };
+}
+
+function isDailySessionStatus(value: unknown): value is DailySessionStatus {
+  return value === "draft" || value === "active" || value === "completed";
+}
+
+function isDailyReviewStatus(value: unknown): value is DailyReviewStatus {
+  return value === "pending" || value === "ready";
+}
+
 function formatCounts(items: string[]): string[] {
   const counts = items.reduce<Map<string, number>>((countMap, item) => {
     countMap.set(item, (countMap.get(item) ?? 0) + 1);
@@ -382,6 +420,47 @@ export async function saveDeliberationSession({ learnerCase, deliberation }: Sav
   }
 }
 
+export async function createDailySession({
+  questionIds,
+  status = "draft",
+  currentIndex = 0,
+  observationCount = 0,
+  reviewStatus = "pending"
+}: SaveDailySessionInput): Promise<DailySession | null> {
+  const firestore = await getFirestoreClient();
+  if (!firestore) {
+    return null;
+  }
+
+  try {
+    const sessionId = crypto.randomUUID();
+    const sessionPayload = removeUndefinedDeep({
+      status,
+      question_ids: questionIds,
+      current_index: currentIndex,
+      observation_count: observationCount,
+      review_status: reviewStatus,
+      created_at: FieldValue.serverTimestamp()
+    });
+
+    await firestore.collection(DAILY_SESSIONS_COLLECTION).doc(sessionId).set(sessionPayload);
+    console.info("[firestore] daily session created");
+
+    return {
+      id: sessionId,
+      created_at: null,
+      status,
+      question_ids: questionIds,
+      current_index: currentIndex,
+      observation_count: observationCount,
+      review_status: reviewStatus
+    };
+  } catch (error) {
+    console.warn("[firestore] create daily session skipped", getErrorDetails(error));
+    return null;
+  }
+}
+
 export async function getRecentSessions(limit = RECENT_SESSION_LIMIT): Promise<SessionRecord[]> {
   const firestore = await getFirestoreClient();
   if (!firestore) {
@@ -417,6 +496,30 @@ export async function getRecentSessions(limit = RECENT_SESSION_LIMIT): Promise<S
 export async function getLatestSession(): Promise<SessionRecord | null> {
   const [session] = await getRecentSessions(1);
   return session ?? null;
+}
+
+export async function getLatestDailySession(): Promise<DailySession | null> {
+  const firestore = await getFirestoreClient();
+  if (!firestore) {
+    return null;
+  }
+
+  try {
+    const snapshot = await firestore
+      .collection(DAILY_SESSIONS_COLLECTION)
+      .orderBy("created_at", "desc")
+      .limit(1)
+      .get();
+
+    if (snapshot.empty) {
+      return null;
+    }
+
+    return toSerializableDailySession(snapshot.docs[0]);
+  } catch (error) {
+    console.warn("[firestore] latest daily session lookup skipped", getErrorDetails(error));
+    return null;
+  }
 }
 
 export async function getLatestMemoryContext(): Promise<string | null> {

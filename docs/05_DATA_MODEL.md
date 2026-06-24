@@ -17,6 +17,7 @@ MentorHQ の MVP では、共有事実・派生状態・Agent 出力・Coach 決
 最初に保存するのは観測事実。
 
 - learner
+- daily_session
 - question
 - question_leg
 - answer_event
@@ -26,6 +27,7 @@ MentorHQ の MVP では、共有事実・派生状態・Agent 出力・Coach 決
 ### Example Fields
 
 - learner.id
+- daily_session.status
 - question.id
 - question_leg.leg_index
 - answer_event.selected_judgment
@@ -104,6 +106,16 @@ Coach の最終判断を保持する。
 - display_name
 - target_exam
 - exam_date
+
+### `daily_session`
+
+- daily_session_id
+- status
+- question_ids
+- current_index
+- observation_count
+- review_status
+- created_at
 
 ### `question`
 

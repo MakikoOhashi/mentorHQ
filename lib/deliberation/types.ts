@@ -71,3 +71,21 @@ export type DeliberationResponse = {
   deliberation_events: DeliberationEvent[];
   coach_decision: CoachDecision;
 };
+
+export const DAILY_SESSION_STATUSES = ["draft", "active", "completed"] as const;
+
+export type DailySessionStatus = (typeof DAILY_SESSION_STATUSES)[number];
+
+export const DAILY_REVIEW_STATUSES = ["pending", "ready"] as const;
+
+export type DailyReviewStatus = (typeof DAILY_REVIEW_STATUSES)[number];
+
+export type DailySession = {
+  id: string;
+  created_at: string | null;
+  status: DailySessionStatus;
+  question_ids: string[];
+  current_index: number;
+  observation_count: number;
+  review_status: DailyReviewStatus;
+};
