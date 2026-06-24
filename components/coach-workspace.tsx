@@ -10,7 +10,8 @@ import type {
   DeliberationEvent,
   DeliberationResponse,
   LearnerCase,
-  ObservationEvent
+  ObservationEvent,
+  TomorrowPlan
 } from "@/lib/deliberation/types";
 
 type CoachWorkspaceProps = {
@@ -25,6 +26,7 @@ type DailySessionPayload = {
   observations: ObservationEvent[];
   latestObservation: ObservationEvent | null;
   dailyReview: DailyReview | null;
+  tomorrowPlan: TomorrowPlan | null;
 };
 
 function getObservationIcon(observation: ObservationEvent) {
@@ -59,12 +61,14 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const [observations, setObservations] = useState<ObservationEvent[]>([]);
   const [latestObservation, setLatestObservation] = useState<ObservationEvent | null>(null);
   const [dailyReview, setDailyReview] = useState<DailyReview | null>(null);
+  const [tomorrowPlan, setTomorrowPlan] = useState<TomorrowPlan | null>(null);
   const [sessionStatusMessage, setSessionStatusMessage] = useState<string>("開始前です。");
   const [events, setEvents] = useState<DeliberationEvent[]>([]);
   const [decision, setDecision] = useState<CoachDecision | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "streaming" | "done" | "error">("idle");
   const [sessionActionStatus, setSessionActionStatus] = useState<"idle" | "starting" | "advancing">("idle");
   const [reviewActionStatus, setReviewActionStatus] = useState<"idle" | "generating">("idle");
+  const [planActionStatus, setPlanActionStatus] = useState<"idle" | "generating">("idle");
   const [mode, setMode] = useState<"mock" | "ai">("mock");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const timeoutIdsRef = useRef<number[]>([]);
@@ -129,6 +133,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       setObservations(payload.observations);
       setLatestObservation(payload.latestObservation);
       setDailyReview(payload.dailyReview);
+      setTomorrowPlan(payload.tomorrowPlan);
       setSessionStatusMessage(
         payload.session.status === "completed"
           ? "今日の3問セッションは完了しました。"
@@ -172,7 +177,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
           totalQuestions: payload.totalQuestions ?? payload.session.question_ids.length,
           observations: payload.observations ?? [],
           latestObservation: payload.latestObservation ?? null,
-          dailyReview: payload.dailyReview ?? null
+          dailyReview: payload.dailyReview ?? null,
+          tomorrowPlan: payload.tomorrowPlan ?? null
         });
       } catch {
         // latest session hydrate is best-effort for demo continuity
@@ -292,6 +298,40 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     }
   }, [applyDailySessionPayload, dailySession]);
 
+  const generateTomorrowPlan = useCallback(async () => {
+    if (!dailySession || dailySession.status !== "completed" || dailySession.review_status !== "generated") {
+      setErrorMessage("Tomorrow Plan は Daily Review 生成後にだけ作成できます。");
+      return;
+    }
+
+    setPlanActionStatus("generating");
+    setErrorMessage(null);
+
+    try {
+      const response = await fetch("/api/daily-session/tomorrow-plan", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          sessionId: dailySession.id
+        })
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error ?? "Tomorrow plan generation failed.");
+      }
+
+      const payload = (await response.json()) as DailySessionPayload;
+      applyDailySessionPayload(payload);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unknown error");
+    } finally {
+      setPlanActionStatus("idle");
+    }
+  }, [applyDailySessionPayload, dailySession]);
+
   const completedQuestionCount = dailySession
     ? Math.min(dailySession.current_index, dailySession.question_ids.length)
     : 0;
@@ -363,6 +403,12 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                 <span className="summary-label">Review Status</span>
                 <div className="reflection-box">
                   {dailySession ? dailySession.review_status : "pending"}
+                </div>
+              </div>
+              <div>
+                <span className="summary-label">Tomorrow Plan Status</span>
+                <div className="reflection-box">
+                  {dailySession ? dailySession.tomorrow_plan_status : "pending"}
                 </div>
               </div>
             </div>
@@ -493,67 +539,135 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
           </article>
 
           {dailySession?.status === "completed" ? (
-            <article className="panel daily-review-panel">
-              <div className="panel-heading tight daily-review-heading">
-                <div>
-                  <span className="panel-kicker">Daily Coach Review</span>
-                  <h3>今日の観測まとめ</h3>
+            <>
+              <article className="panel daily-review-panel">
+                <div className="panel-heading tight daily-review-heading">
+                  <div>
+                    <span className="panel-kicker">Daily Coach Review</span>
+                    <h3>今日の観測まとめ</h3>
+                  </div>
+                  <span className="review-status-pill">
+                    {dailySession.review_status === "generated" ? "generated" : "pending"}
+                  </span>
                 </div>
-                <span className="review-status-pill">
-                  {dailySession.review_status === "generated" ? "generated" : "pending"}
-                </span>
-              </div>
 
-              {dailyReview ? (
-                <div className="daily-review-content">
-                  <section className="daily-review-block">
-                    <span className="summary-label">今日の観測まとめ</span>
-                    <div className="reflection-box">{dailyReview.summary}</div>
-                  </section>
+                {dailyReview ? (
+                  <div className="daily-review-content">
+                    <section className="daily-review-block">
+                      <span className="summary-label">今日の観測まとめ</span>
+                      <div className="reflection-box">{dailyReview.summary}</div>
+                    </section>
 
-                  <section className="daily-review-block">
-                    <span className="summary-label">観測メモ</span>
-                    <div className="review-list">
-                      {dailyReview.key_observations.map((item) => (
-                        <p key={item}>{item}</p>
-                      ))}
-                    </div>
-                  </section>
+                    <section className="daily-review-block">
+                      <span className="summary-label">観測メモ</span>
+                      <div className="review-list">
+                        {dailyReview.key_observations.map((item) => (
+                          <p key={item}>{item}</p>
+                        ))}
+                      </div>
+                    </section>
 
-                  <section className="daily-review-block">
-                    <span className="summary-label">明日の重点候補</span>
-                    <div className="review-list">
-                      {dailyReview.repeated_patterns.map((item) => (
-                        <p key={item}>{item}</p>
-                      ))}
-                    </div>
-                  </section>
+                    <section className="daily-review-block">
+                      <span className="summary-label">明日の重点候補</span>
+                      <div className="review-list">
+                        {dailyReview.repeated_patterns.map((item) => (
+                          <p key={item}>{item}</p>
+                        ))}
+                      </div>
+                    </section>
 
-                  <section className="daily-review-block">
-                    <span className="summary-label">コーチコメント</span>
-                    <div className="reflection-box">{dailyReview.coach_comment}</div>
-                  </section>
+                    <section className="daily-review-block">
+                      <span className="summary-label">コーチコメント</span>
+                      <div className="reflection-box">{dailyReview.coach_comment}</div>
+                    </section>
+                  </div>
+                ) : (
+                  <div className="review-empty-state">
+                    <p>3問完了後に、その日の観測をまとめます。</p>
+                    <p>まだ最終判断ではなく、今日の振り返りだけを残します。</p>
+                  </div>
+                )}
+
+                <button
+                  className="primary-button"
+                  onClick={() => void generateDailyReview()}
+                  type="button"
+                  disabled={reviewActionStatus !== "idle" || dailySession.review_status === "generated"}
+                >
+                  {reviewActionStatus === "generating"
+                    ? "Generating..."
+                    : dailySession.review_status === "generated"
+                      ? "Daily Review Generated"
+                      : "Generate Daily Review"}
+                </button>
+              </article>
+
+              <article className="panel tomorrow-plan-panel">
+                <div className="panel-heading tight daily-review-heading">
+                  <div>
+                    <span className="panel-kicker">Tomorrow Plan</span>
+                    <h3>明日の練習方針</h3>
+                  </div>
+                  <span className="review-status-pill">
+                    {dailySession.tomorrow_plan_status === "generated" ? "generated" : "pending"}
+                  </span>
                 </div>
-              ) : (
-                <div className="review-empty-state">
-                  <p>3問完了後に、その日の観測をまとめます。</p>
-                  <p>まだ最終判断ではなく、今日の振り返りだけを残します。</p>
-                </div>
-              )}
 
-              <button
-                className="primary-button"
-                onClick={() => void generateDailyReview()}
-                type="button"
-                disabled={reviewActionStatus !== "idle" || dailySession.review_status === "generated"}
-              >
-                {reviewActionStatus === "generating"
-                  ? "Generating..."
-                  : dailySession.review_status === "generated"
-                    ? "Daily Review Generated"
-                    : "Generate Daily Review"}
-              </button>
-            </article>
+                {tomorrowPlan ? (
+                  <div className="daily-review-content">
+                    <section className="daily-review-block">
+                      <span className="summary-label">Focus Theme</span>
+                      <div className="reflection-box">{tomorrowPlan.focus_theme}</div>
+                    </section>
+
+                    <section className="daily-review-block">
+                      <span className="summary-label">Practice Items</span>
+                      <div className="review-list">
+                        {tomorrowPlan.practice_items.map((item) => (
+                          <p key={item}>{item}</p>
+                        ))}
+                      </div>
+                    </section>
+
+                    <section className="daily-review-block">
+                      <span className="summary-label">Caution Points</span>
+                      <div className="review-list">
+                        {tomorrowPlan.caution_points.map((item) => (
+                          <p key={item}>{item}</p>
+                        ))}
+                      </div>
+                    </section>
+
+                    <section className="daily-review-block">
+                      <span className="summary-label">Coach Message</span>
+                      <div className="reflection-box">{tomorrowPlan.coach_message}</div>
+                    </section>
+                  </div>
+                ) : (
+                  <div className="review-empty-state">
+                    <p>Daily Review のあとで、明日の練習方針を組み立てます。</p>
+                    <p>「次の一問」ではなく、「明日はこれを見ましょう」を残します。</p>
+                  </div>
+                )}
+
+                <button
+                  className="primary-button"
+                  onClick={() => void generateTomorrowPlan()}
+                  type="button"
+                  disabled={
+                    planActionStatus !== "idle" ||
+                    dailySession.tomorrow_plan_status === "generated" ||
+                    dailySession.review_status !== "generated"
+                  }
+                >
+                  {planActionStatus === "generating"
+                    ? "Generating..."
+                    : dailySession.tomorrow_plan_status === "generated"
+                      ? "Tomorrow Plan Generated"
+                      : "Generate Tomorrow Plan"}
+                </button>
+              </article>
+            </>
           ) : null}
         </div>
       </section>

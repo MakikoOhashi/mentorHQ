@@ -354,6 +354,13 @@ blockquote {
     linear-gradient(180deg, #ffffff, #fbfdfb);
 }
 
+.tomorrow-plan-panel {
+  padding: 22px;
+  background:
+    radial-gradient(circle at top right, rgba(49, 88, 211, 0.09), transparent 32%),
+    linear-gradient(180deg, #ffffff, #fbfcff);
+}
+
 .daily-review-heading {
   display: flex;
   align-items: flex-start;

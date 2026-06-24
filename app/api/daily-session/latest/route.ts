@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 
 import { getLearnerCaseByQuestionId } from "@/lib/deliberation/mock";
-import { getDailyReviewForSession, getLatestDailySession, getObservationEventsForDailySession } from "@/lib/deliberation/session-memory";
+import {
+  getDailyReviewForSession,
+  getLatestDailySession,
+  getObservationEventsForDailySession,
+  getTomorrowPlanForSession
+} from "@/lib/deliberation/session-memory";
 
 export const runtime = "nodejs";
 
@@ -17,6 +22,7 @@ export async function GET() {
   const learnerCase = currentQuestionId ? getLearnerCaseByQuestionId(currentQuestionId) : null;
   const observations = await getObservationEventsForDailySession(session.id);
   const dailyReview = await getDailyReviewForSession(session.id);
+  const tomorrowPlan = await getTomorrowPlanForSession(session.id);
 
   return NextResponse.json({
     session,
@@ -25,6 +31,7 @@ export async function GET() {
     totalQuestions: session.question_ids.length,
     observations,
     latestObservation: observations.at(-1) ?? null,
-    dailyReview
+    dailyReview,
+    tomorrowPlan
   });
 }

@@ -9,10 +9,14 @@ import type {
   DeliberationResponse,
   LearnerCase,
   ObservationEvent,
-  ObservationEventInput
+  ObservationEventInput,
+  TomorrowPlan,
+  TomorrowPlanInput,
+  TomorrowPlanStatus
 } from "@/lib/deliberation/types";
 import { detectMisunderstandingTypeFromDeliberation } from "@/lib/deliberation/observation";
 import { buildDailyReviewInput } from "@/lib/deliberation/review";
+import { buildTomorrowPlanInput } from "@/lib/deliberation/tomorrow-plan";
 import { applicationDefault, getApp, getApps, initializeApp } from "firebase-admin/app";
 import { FieldValue, getFirestore, type Firestore, type QueryDocumentSnapshot, type Timestamp } from "firebase-admin/firestore";
 import { readFile, writeFile } from "node:fs/promises";
@@ -54,6 +58,7 @@ export type SaveDailySessionInput = {
   currentIndex?: number;
   observationCount?: number;
   reviewStatus?: DailyReviewStatus;
+  tomorrowPlanStatus?: TomorrowPlanStatus;
 };
 
 export type AdvanceDailySessionInput = {
@@ -65,17 +70,24 @@ export type GenerateDailyReviewInput = {
   sessionId: string;
 };
 
+export type GenerateTomorrowPlanInput = {
+  sessionId: string;
+};
+
 const SESSIONS_COLLECTION = "sessions";
 const DAILY_SESSIONS_COLLECTION = "daily_sessions";
 const OBSERVATION_EVENTS_COLLECTION = "observation_events";
 const DAILY_REVIEWS_COLLECTION = "daily_reviews";
+const TOMORROW_PLANS_COLLECTION = "tomorrow_plans";
 const RECENT_SESSION_LIMIT = 5;
 const inMemoryDailySessions = new Map<string, DailySession>();
 const inMemoryObservationEvents = new Map<string, ObservationEvent>();
 const inMemoryDailyReviews = new Map<string, DailyReview>();
+const inMemoryTomorrowPlans = new Map<string, TomorrowPlan>();
 const DAILY_SESSIONS_FALLBACK_PATH = join("/tmp", "mentorhq-daily-sessions.json");
 const OBSERVATION_EVENTS_FALLBACK_PATH = join("/tmp", "mentorhq-observation-events.json");
 const DAILY_REVIEWS_FALLBACK_PATH = join("/tmp", "mentorhq-daily-reviews.json");
+const TOMORROW_PLANS_FALLBACK_PATH = join("/tmp", "mentorhq-tomorrow-plans.json");
 
 function getInterventionLabel(intervention: DeliberationResponse["coach_decision"]["selected_intervention"]): string {
   switch (intervention) {
@@ -263,7 +275,8 @@ function toSerializableDailySession(snapshot: QueryDocumentSnapshot): DailySessi
     question_ids: data.question_ids.filter((value: unknown): value is string => typeof value === "string"),
     current_index: typeof data.current_index === "number" ? data.current_index : 0,
     observation_count: typeof data.observation_count === "number" ? data.observation_count : 0,
-    review_status: normalizeDailyReviewStatus(data.review_status)
+    review_status: normalizeDailyReviewStatus(data.review_status),
+    tomorrow_plan_status: normalizeTomorrowPlanStatus(data.tomorrow_plan_status)
   };
 }
 
@@ -318,6 +331,32 @@ function toSerializableDailyReview(snapshot: QueryDocumentSnapshot): DailyReview
   };
 }
 
+function toSerializableTomorrowPlan(snapshot: QueryDocumentSnapshot): TomorrowPlan | null {
+  const data = snapshot.data();
+
+  if (
+    typeof data.daily_session_id !== "string" ||
+    typeof data.daily_review_id !== "string" ||
+    typeof data.focus_theme !== "string" ||
+    !Array.isArray(data.practice_items) ||
+    !Array.isArray(data.caution_points) ||
+    typeof data.coach_message !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    id: snapshot.id,
+    daily_session_id: data.daily_session_id,
+    daily_review_id: data.daily_review_id,
+    focus_theme: data.focus_theme,
+    practice_items: data.practice_items.filter((value: unknown): value is string => typeof value === "string"),
+    caution_points: data.caution_points.filter((value: unknown): value is string => typeof value === "string"),
+    coach_message: data.coach_message,
+    created_at: toSerializableCreatedAt(data.created_at)
+  };
+}
+
 function isDailySessionStatus(value: unknown): value is DailySessionStatus {
   return value === "draft" || value === "active" || value === "completed";
 }
@@ -332,6 +371,14 @@ function normalizeDailyReviewStatus(value: unknown): DailyReviewStatus {
   }
 
   return isDailyReviewStatus(value) ? value : "pending";
+}
+
+function isTomorrowPlanStatus(value: unknown): value is TomorrowPlanStatus {
+  return value === "pending" || value === "generated";
+}
+
+function normalizeTomorrowPlanStatus(value: unknown): TomorrowPlanStatus {
+  return isTomorrowPlanStatus(value) ? value : "pending";
 }
 
 function isSelectedIntervention(value: unknown): value is ObservationEvent["intervention_type"] {
@@ -413,7 +460,11 @@ async function loadFallbackDailySessions(): Promise<DailySession[]> {
       return [];
     }
 
-    return sessions;
+    return sessions.map((session) => ({
+      ...session,
+      review_status: normalizeDailyReviewStatus(session.review_status),
+      tomorrow_plan_status: normalizeTomorrowPlanStatus(session.tomorrow_plan_status)
+    }));
   } catch {
     return [];
   }
@@ -440,6 +491,11 @@ function saveObservationEventToMemory(event: ObservationEvent): ObservationEvent
 function saveDailyReviewToMemory(review: DailyReview): DailyReview {
   inMemoryDailyReviews.set(review.daily_session_id, review);
   return review;
+}
+
+function saveTomorrowPlanToMemory(plan: TomorrowPlan): TomorrowPlan {
+  inMemoryTomorrowPlans.set(plan.daily_session_id, plan);
+  return plan;
 }
 
 async function loadFallbackObservationEvents(): Promise<ObservationEvent[]> {
@@ -496,6 +552,33 @@ async function saveDailyReviewToFallback(review: DailyReview): Promise<DailyRevi
   return review;
 }
 
+async function loadFallbackTomorrowPlans(): Promise<TomorrowPlan[]> {
+  try {
+    const text = await readFile(TOMORROW_PLANS_FALLBACK_PATH, "utf8");
+    const plans = JSON.parse(text) as TomorrowPlan[];
+    if (!Array.isArray(plans)) {
+      return [];
+    }
+
+    return plans;
+  } catch {
+    return [];
+  }
+}
+
+async function persistFallbackTomorrowPlans(plans: TomorrowPlan[]): Promise<void> {
+  await writeFile(TOMORROW_PLANS_FALLBACK_PATH, JSON.stringify(plans, null, 2), "utf8");
+}
+
+async function saveTomorrowPlanToFallback(plan: TomorrowPlan): Promise<TomorrowPlan> {
+  saveTomorrowPlanToMemory(plan);
+  const plans = await loadFallbackTomorrowPlans();
+  const nextPlans = plans.filter((item) => item.daily_session_id !== plan.daily_session_id);
+  nextPlans.push(plan);
+  await persistFallbackTomorrowPlans(nextPlans);
+  return plan;
+}
+
 async function getObservationEventsFromFallback(dailySessionId: string): Promise<ObservationEvent[]> {
   const fileEvents = await loadFallbackObservationEvents();
   const memoryEvents = Array.from(inMemoryObservationEvents.values());
@@ -539,6 +622,17 @@ async function getDailyReviewFromFallback(dailySessionId: string): Promise<Daily
   }, new Map());
 
   return reviews.get(dailySessionId) ?? null;
+}
+
+async function getTomorrowPlanFromFallback(dailySessionId: string): Promise<TomorrowPlan | null> {
+  const filePlans = await loadFallbackTomorrowPlans();
+  const memoryPlans = Array.from(inMemoryTomorrowPlans.values());
+  const plans = [...filePlans, ...memoryPlans].reduce<Map<string, TomorrowPlan>>((map, plan) => {
+    map.set(plan.daily_session_id, plan);
+    return map;
+  }, new Map());
+
+  return plans.get(dailySessionId) ?? null;
 }
 
 function buildMemoryMessageHint(summary: Omit<MemorySummary, "memoryMessageHint">): string {
@@ -649,7 +743,8 @@ export async function createDailySession({
   status = "draft",
   currentIndex = 0,
   observationCount = 0,
-  reviewStatus = "pending"
+  reviewStatus = "pending",
+  tomorrowPlanStatus = "pending"
 }: SaveDailySessionInput): Promise<DailySession | null> {
   const firestore = await getFirestoreClient();
   const sessionId = crypto.randomUUID();
@@ -660,7 +755,8 @@ export async function createDailySession({
     question_ids: questionIds,
     current_index: currentIndex,
     observation_count: observationCount,
-    review_status: reviewStatus
+    review_status: reviewStatus,
+    tomorrow_plan_status: tomorrowPlanStatus
   };
 
   if (!firestore) {
@@ -674,6 +770,7 @@ export async function createDailySession({
       current_index: currentIndex,
       observation_count: observationCount,
       review_status: reviewStatus,
+      tomorrow_plan_status: tomorrowPlanStatus,
       created_at: FieldValue.serverTimestamp()
     });
 
@@ -783,6 +880,51 @@ async function createDailyReview(review: DailyReviewInput): Promise<DailyReview 
   }
 }
 
+async function createTomorrowPlan(plan: TomorrowPlanInput): Promise<TomorrowPlan | null> {
+  const firestore = await getFirestoreClient();
+  const planId = crypto.randomUUID();
+  const fallbackPlan: TomorrowPlan = {
+    id: planId,
+    daily_session_id: plan.daily_session_id,
+    daily_review_id: plan.daily_review_id,
+    focus_theme: plan.focus_theme,
+    practice_items: plan.practice_items,
+    caution_points: plan.caution_points,
+    coach_message: plan.coach_message,
+    created_at: new Date().toISOString()
+  };
+
+  if (!firestore) {
+    return saveTomorrowPlanToFallback(fallbackPlan);
+  }
+
+  try {
+    const payload = removeUndefinedDeep({
+      daily_session_id: plan.daily_session_id,
+      daily_review_id: plan.daily_review_id,
+      focus_theme: plan.focus_theme,
+      practice_items: plan.practice_items,
+      caution_points: plan.caution_points,
+      coach_message: plan.coach_message,
+      created_at: FieldValue.serverTimestamp()
+    });
+
+    await firestore.collection(TOMORROW_PLANS_COLLECTION).doc(planId).set(payload);
+    console.info("[firestore] tomorrow plan created");
+
+    return {
+      ...fallbackPlan,
+      created_at: null
+    };
+  } catch (error) {
+    if (isMissingDefaultCredentialsError(error)) {
+      disableFirestoreRuntime();
+    }
+    console.warn("[firestore] create tomorrow plan skipped", getErrorDetails(error));
+    return saveTomorrowPlanToFallback(fallbackPlan);
+  }
+}
+
 export async function getDailySessionById(sessionId: string): Promise<DailySession | null> {
   const firestore = await getFirestoreClient();
   if (!firestore) {
@@ -842,6 +984,39 @@ async function updateDailySessionReviewStatus(
       disableFirestoreRuntime();
     }
     console.warn("[firestore] daily session review status update skipped", getErrorDetails(error));
+    return saveDailySessionToFallback(nextSession);
+  }
+}
+
+async function updateDailySessionTomorrowPlanStatus(
+  session: DailySession,
+  tomorrowPlanStatus: TomorrowPlanStatus
+): Promise<DailySession> {
+  const nextSession: DailySession = {
+    ...session,
+    tomorrow_plan_status: tomorrowPlanStatus
+  };
+  const firestore = await getFirestoreClient();
+
+  if (!firestore) {
+    return saveDailySessionToFallback(nextSession);
+  }
+
+  try {
+    await firestore.collection(DAILY_SESSIONS_COLLECTION).doc(session.id).set(
+      removeUndefinedDeep({
+        tomorrow_plan_status: tomorrowPlanStatus
+      }),
+      { merge: true }
+    );
+
+    saveDailySessionToMemory(nextSession);
+    return nextSession;
+  } catch (error) {
+    if (isMissingDefaultCredentialsError(error)) {
+      disableFirestoreRuntime();
+    }
+    console.warn("[firestore] tomorrow plan status update skipped", getErrorDetails(error));
     return saveDailySessionToFallback(nextSession);
   }
 }
@@ -960,6 +1135,33 @@ export async function getDailyReviewForSession(dailySessionId: string): Promise<
   }
 }
 
+export async function getTomorrowPlanForSession(dailySessionId: string): Promise<TomorrowPlan | null> {
+  const firestore = await getFirestoreClient();
+  if (!firestore) {
+    return getTomorrowPlanFromFallback(dailySessionId);
+  }
+
+  try {
+    const snapshot = await firestore
+      .collection(TOMORROW_PLANS_COLLECTION)
+      .where("daily_session_id", "==", dailySessionId)
+      .limit(1)
+      .get();
+
+    if (snapshot.empty) {
+      return null;
+    }
+
+    return toSerializableTomorrowPlan(snapshot.docs[0]);
+  } catch (error) {
+    if (isMissingDefaultCredentialsError(error)) {
+      disableFirestoreRuntime();
+    }
+    console.warn("[firestore] tomorrow plan lookup skipped", getErrorDetails(error));
+    return getTomorrowPlanFromFallback(dailySessionId);
+  }
+}
+
 export async function generateDailyReviewForSession({
   sessionId
 }: GenerateDailyReviewInput): Promise<{ session: DailySession; review: DailyReview } | null> {
@@ -1002,6 +1204,57 @@ export async function generateDailyReviewForSession({
   return {
     session: updatedSession,
     review
+  };
+}
+
+export async function generateTomorrowPlanForSession({
+  sessionId
+}: GenerateTomorrowPlanInput): Promise<{ session: DailySession; plan: TomorrowPlan } | null> {
+  const session = await getDailySessionById(sessionId);
+  if (!session || session.status !== "completed" || session.review_status !== "generated") {
+    return null;
+  }
+
+  const review = await getDailyReviewForSession(sessionId);
+  if (!review) {
+    return null;
+  }
+
+  const existingPlan = await getTomorrowPlanForSession(sessionId);
+  if (existingPlan) {
+    const updatedSession =
+      session.tomorrow_plan_status === "generated"
+        ? session
+        : await updateDailySessionTomorrowPlanStatus(session, "generated");
+
+    return {
+      session: updatedSession,
+      plan: existingPlan
+    };
+  }
+
+  const observations = await getObservationEventsForDailySession(sessionId);
+  if (observations.length === 0) {
+    return null;
+  }
+
+  const memorySummary = await getLatestMemorySummary();
+  const planInput = buildTomorrowPlanInput({
+    dailySessionId: sessionId,
+    dailyReview: review,
+    observations,
+    memorySummary
+  });
+  const plan = await createTomorrowPlan(planInput);
+  if (!plan) {
+    return null;
+  }
+
+  const updatedSession = await updateDailySessionTomorrowPlanStatus(session, "generated");
+
+  return {
+    session: updatedSession,
+    plan
   };
 }
 

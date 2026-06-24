@@ -80,6 +80,10 @@ export const DAILY_REVIEW_STATUSES = ["pending", "generated"] as const;
 
 export type DailyReviewStatus = (typeof DAILY_REVIEW_STATUSES)[number];
 
+export const TOMORROW_PLAN_STATUSES = ["pending", "generated"] as const;
+
+export type TomorrowPlanStatus = (typeof TOMORROW_PLAN_STATUSES)[number];
+
 export type DailySession = {
   id: string;
   created_at: string | null;
@@ -88,6 +92,7 @@ export type DailySession = {
   current_index: number;
   observation_count: number;
   review_status: DailyReviewStatus;
+  tomorrow_plan_status: TomorrowPlanStatus;
 };
 
 export const OBSERVATION_MISUNDERSTANDING_TYPES = [
@@ -136,4 +141,24 @@ export type DailyReviewInput = {
   key_observations: string[];
   repeated_patterns: string[];
   coach_comment: string;
+};
+
+export type TomorrowPlan = {
+  id: string;
+  daily_session_id: string;
+  daily_review_id: string;
+  focus_theme: string;
+  practice_items: string[];
+  caution_points: string[];
+  coach_message: string;
+  created_at: string | null;
+};
+
+export type TomorrowPlanInput = {
+  daily_session_id: string;
+  daily_review_id: string;
+  focus_theme: string;
+  practice_items: string[];
+  caution_points: string[];
+  coach_message: string;
 };

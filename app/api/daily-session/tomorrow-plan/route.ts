@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { getLearnerCaseByQuestionId } from "@/lib/deliberation/mock";
 import {
-  generateDailyReviewForSession,
+  generateTomorrowPlanForSession,
   getDailyReviewForSession,
   getDailySessionById,
   getObservationEventsForDailySession,
@@ -23,21 +23,28 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Daily session not found" }, { status: 404 });
   }
 
-  if (currentSession.status !== "completed") {
-    return NextResponse.json({ error: "Daily review is available only after completion" }, { status: 400 });
+  const dailyReview = await getDailyReviewForSession(body.sessionId);
+  if (
+    currentSession.status !== "completed" ||
+    currentSession.review_status !== "generated" ||
+    !dailyReview
+  ) {
+    return NextResponse.json(
+      { error: "Tomorrow Plan is available only after Daily Review generation" },
+      { status: 400 }
+    );
   }
 
-  const result = await generateDailyReviewForSession({ sessionId: body.sessionId });
+  const result = await generateTomorrowPlanForSession({ sessionId: body.sessionId });
   if (!result) {
-    return NextResponse.json({ error: "Failed to generate daily review" }, { status: 500 });
+    return NextResponse.json({ error: "Failed to generate tomorrow plan" }, { status: 500 });
   }
 
   const currentQuestionId =
     result.session.status === "completed" ? null : result.session.question_ids[result.session.current_index] ?? null;
   const learnerCase = currentQuestionId ? getLearnerCaseByQuestionId(currentQuestionId) : null;
   const observations = await getObservationEventsForDailySession(result.session.id);
-  const dailyReview = (await getDailyReviewForSession(result.session.id)) ?? result.review;
-  const tomorrowPlan = await getTomorrowPlanForSession(result.session.id);
+  const tomorrowPlan = (await getTomorrowPlanForSession(result.session.id)) ?? result.plan;
 
   return NextResponse.json({
     session: result.session,
