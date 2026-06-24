@@ -23,6 +23,58 @@ export function getDefaultLearnerCase(): LearnerCase {
   };
 }
 
+export type MockDailyPracticeQuestion = {
+  id: string;
+  learnerCase: LearnerCase;
+};
+
+export const MOCK_DAILY_PRACTICE_QUESTIONS: MockDailyPracticeQuestion[] = [
+  {
+    id: "q1",
+    learnerCase: getDefaultLearnerCase()
+  },
+  {
+    id: "q2",
+    learnerCase: {
+      exam: "管理業務主任者試験",
+      theme: "区分所有法 / 共用部分の変更",
+      questionTitle: "共用部分の変更を見抜けるか",
+      questionStem:
+        "次の記述のうち、区分所有法上の共用部分の変更に関するものとして正しいか判断してください。",
+      currentLeg:
+        "共用部分の著しい変更であっても、区分所有者および議決権の各過半数で決議できる。",
+      learnerAnswer: "正しいと思った",
+      reason: "変更だから通常決議でも足りると思った。",
+      objectiveTruth:
+        "誤り。共用部分の著しい変更には原則として特別決議が必要であり、各過半数では足りない。"
+    }
+  },
+  {
+    id: "q3",
+    learnerCase: {
+      exam: "管理業務主任者試験",
+      theme: "標準管理規約 / 管理者の権限",
+      questionTitle: "管理者の権限範囲を切り分けられるか",
+      questionStem:
+        "次の記述のうち、管理組合の管理者の権限に関するものとして正しいか判断してください。",
+      currentLeg:
+        "管理者は、規約に別段の定めがなくても、共用部分の重大変更について単独で契約を締結できる。",
+      learnerAnswer: "やや正しいと思った",
+      reason: "管理者なら対外的に代表できるので単独でも進められると思った。",
+      objectiveTruth:
+        "誤り。管理者に代表権があっても、重大変更は総会決議などの内部意思決定を要し、単独で自由に進められるわけではない。"
+    }
+  }
+];
+
+export function getMockDailyPracticeQuestionIds(): string[] {
+  return MOCK_DAILY_PRACTICE_QUESTIONS.map((question) => question.id);
+}
+
+export function getLearnerCaseByQuestionId(questionId: string): LearnerCase | null {
+  return MOCK_DAILY_PRACTICE_QUESTIONS.find((question) => question.id === questionId)?.learnerCase ?? null;
+}
+
 function getMemoryChallengeMessage(memorySummary?: MemorySummary | null): string {
   if (!memorySummary) {
     return "前も条件を飛ばしてたし、今回もそこ怪しい。";

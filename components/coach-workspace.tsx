@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type {
   CoachDecision,
+  DailySession,
   DeliberationEvent,
   DeliberationResponse,
   LearnerCase
@@ -17,6 +18,13 @@ type StreamEvent = {
   id: string;
   event: DeliberationEvent;
   phase: "live" | "exiting";
+};
+
+type DailySessionPayload = {
+  session: DailySession;
+  learnerCase: LearnerCase | null;
+  currentQuestionId: string | null;
+  totalQuestions: number;
 };
 
 const agentIcons: Record<string, string> = {
@@ -100,11 +108,14 @@ function getCumulativeEventDelay(events: DeliberationEvent[], index: number) {
 }
 
 export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
-  const [learnerCase] = useState(initialCase);
+  const [learnerCase, setLearnerCase] = useState(initialCase);
+  const [dailySession, setDailySession] = useState<DailySession | null>(null);
+  const [sessionStatusMessage, setSessionStatusMessage] = useState<string>("開始前です。");
   const [events, setEvents] = useState<DeliberationEvent[]>([]);
   const [streamEvents, setStreamEvents] = useState<StreamEvent[]>([]);
   const [decision, setDecision] = useState<CoachDecision | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "streaming" | "done" | "error">("idle");
+  const [sessionActionStatus, setSessionActionStatus] = useState<"idle" | "starting" | "advancing">("idle");
   const [mode, setMode] = useState<"mock" | "ai">("mock");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const timeoutIdsRef = useRef<number[]>([]);
@@ -115,7 +126,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     timeoutIdsRef.current = [];
   }, []);
 
-  const runDeliberation = useCallback(async () => {
+  const runDeliberation = useCallback(async (targetCase?: LearnerCase) => {
     clearScheduledUpdates();
     setStatus("loading");
     setEvents([]);
@@ -130,7 +141,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ learnerCase })
+        body: JSON.stringify({ learnerCase: targetCase ?? learnerCase })
       });
 
       if (!response.ok) {
@@ -183,16 +194,108 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     }
   }, [clearScheduledUpdates, learnerCase]);
 
-  useEffect(() => {
-    void runDeliberation();
-    return () => {
-      clearScheduledUpdates();
-    };
-  }, [clearScheduledUpdates, runDeliberation]);
+  useEffect(() => () => {
+    clearScheduledUpdates();
+  }, [clearScheduledUpdates]);
+
+  const applyDailySessionPayload = useCallback(
+    (payload: DailySessionPayload) => {
+      setDailySession(payload.session);
+      setSessionStatusMessage(
+        payload.session.status === "completed"
+          ? "今日の3問セッションは完了しました。"
+          : `今日の固定3問セッションを進行中です。`
+      );
+
+      if (payload.learnerCase) {
+        setLearnerCase(payload.learnerCase);
+      }
+
+      if (payload.session.status === "completed") {
+        clearScheduledUpdates();
+        setEvents([]);
+        setStreamEvents([]);
+        setDecision(null);
+        setStatus("idle");
+        setErrorMessage(null);
+      }
+    },
+    [clearScheduledUpdates]
+  );
+
+  const startDailySession = useCallback(async () => {
+    setSessionActionStatus("starting");
+    setErrorMessage(null);
+
+    try {
+      const response = await fetch("/api/daily-session/start", {
+        method: "POST"
+      });
+
+      if (!response.ok) {
+        throw new Error("Daily session start failed.");
+      }
+
+      const payload = (await response.json()) as DailySessionPayload;
+      applyDailySessionPayload(payload);
+
+      if (payload.learnerCase) {
+        await runDeliberation(payload.learnerCase);
+      }
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unknown error");
+    } finally {
+      setSessionActionStatus("idle");
+    }
+  }, [applyDailySessionPayload, runDeliberation]);
+
+  const advanceToNextQuestion = useCallback(async () => {
+    if (!dailySession) {
+      return;
+    }
+
+    setSessionActionStatus("advancing");
+    setErrorMessage(null);
+
+    try {
+      const response = await fetch("/api/daily-session/advance", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ sessionId: dailySession.id })
+      });
+
+      if (!response.ok) {
+        throw new Error("Daily session advance failed.");
+      }
+
+      const payload = (await response.json()) as DailySessionPayload;
+      applyDailySessionPayload(payload);
+
+      if (payload.session.status !== "completed" && payload.learnerCase) {
+        await runDeliberation(payload.learnerCase);
+      }
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unknown error");
+    } finally {
+      setSessionActionStatus("idle");
+    }
+  }, [applyDailySessionPayload, dailySession, runDeliberation]);
 
   const visibleLiveCount = streamEvents.filter((item) => item.phase !== "exiting").length;
 
   const streamStatus = getStreamStatus(status);
+  const completedQuestionCount = dailySession
+    ? Math.min(dailySession.current_index, dailySession.question_ids.length)
+    : 0;
+  const activeQuestionNumber =
+    dailySession && dailySession.status !== "completed" ? dailySession.current_index + 1 : null;
+  const canAdvance = dailySession !== null && dailySession.status !== "completed" && status === "done";
+  const isFinalActiveQuestion =
+    dailySession !== null &&
+    dailySession.status !== "completed" &&
+    dailySession.current_index === dailySession.question_ids.length - 1;
 
   return (
     <main className="page-shell">
@@ -225,6 +328,43 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
           </article>
 
           <article className="panel compact answer-panel">
+            <div className="panel-heading tight">
+              <span className="panel-kicker">Daily Session</span>
+              <h3>固定3問セッション</h3>
+            </div>
+            <div className="compact-stack">
+              <div>
+                <span className="summary-label">セッション状態</span>
+                <p className="value-text session-status-text">
+                  {dailySession ? dailySession.status : "not_started"}
+                </p>
+              </div>
+              <div>
+                <span className="summary-label">進行状況</span>
+                <div className="reflection-box">
+                  {dailySession
+                    ? `${completedQuestionCount} / ${dailySession.question_ids.length} 問完了${
+                        activeQuestionNumber ? `・現在 ${activeQuestionNumber} 問目` : ""
+                      }`
+                    : "Start Daily Session で今日の3問を開始します。"}
+                </div>
+              </div>
+              <div>
+                <span className="summary-label">表示</span>
+                <div className="reflection-box">{sessionStatusMessage}</div>
+              </div>
+            </div>
+            <button
+              className="primary-button"
+              onClick={() => void startDailySession()}
+              type="button"
+              disabled={sessionActionStatus !== "idle" || Boolean(dailySession && dailySession.status !== "completed")}
+            >
+              {sessionActionStatus === "starting" ? "Starting..." : "Start Daily Session"}
+            </button>
+          </article>
+
+          <article className="panel compact answer-panel">
             <div className="compact-stack">
               <div>
                 <span className="summary-label">学習者の回答</span>
@@ -247,7 +387,12 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
               <h3>Deliberation を再実行</h3>
             </div>
             <p className="body-copy compact-copy">短い発言を流しながら、次の一問を絞り込みます。</p>
-            <button className="primary-button" onClick={() => void runDeliberation()} type="button">
+            <button
+              className="primary-button"
+              onClick={() => void runDeliberation()}
+              type="button"
+              disabled={!dailySession || dailySession.status === "completed" || status === "loading" || status === "streaming"}
+            >
               {status === "loading" || status === "streaming" ? "Running..." : "Run Deliberation"}
             </button>
             {errorMessage ? <p className="error-text">{errorMessage}</p> : null}
@@ -356,6 +501,18 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
             <p className="next-question-copy">
               {decision?.next_question ?? "Coach Decision の完了後に、ここへ固定表示されます。"}
             </p>
+            <button
+              className="primary-button secondary-button"
+              onClick={() => void advanceToNextQuestion()}
+              type="button"
+              disabled={!canAdvance || sessionActionStatus !== "idle"}
+            >
+              {sessionActionStatus === "advancing"
+                ? "Advancing..."
+                : isFinalActiveQuestion
+                  ? "この問題でセッション完了"
+                  : "この問題を完了して次へ"}
+            </button>
           </article>
         </div>
       </section>

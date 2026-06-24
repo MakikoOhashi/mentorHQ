@@ -9,6 +9,8 @@ import type {
 } from "@/lib/deliberation/types";
 import { applicationDefault, getApp, getApps, initializeApp } from "firebase-admin/app";
 import { FieldValue, getFirestore, type Firestore, type QueryDocumentSnapshot, type Timestamp } from "firebase-admin/firestore";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 
 export type SessionRecord = {
   id: string;
@@ -48,9 +50,15 @@ export type SaveDailySessionInput = {
   reviewStatus?: DailyReviewStatus;
 };
 
+export type AdvanceDailySessionInput = {
+  sessionId: string;
+};
+
 const SESSIONS_COLLECTION = "sessions";
 const DAILY_SESSIONS_COLLECTION = "daily_sessions";
 const RECENT_SESSION_LIMIT = 5;
+const inMemoryDailySessions = new Map<string, DailySession>();
+const DAILY_SESSIONS_FALLBACK_PATH = join("/tmp", "mentorhq-daily-sessions.json");
 
 function getInterventionLabel(intervention: DeliberationResponse["coach_decision"]["selected_intervention"]): string {
   switch (intervention) {
@@ -118,10 +126,19 @@ function detectMisunderstandingTypeFromParts(
 }
 
 let firestorePromise: Promise<Firestore | null> | null = null;
+let firestoreRuntimeDisabled = false;
 
 function isFirestoreDisabled(): boolean {
+  if (firestoreRuntimeDisabled) {
+    return true;
+  }
+
   const value = process.env.FIRESTORE_DISABLED?.trim().toLowerCase();
   return value === "true" || value === "1" || value === "yes";
+}
+
+function disableFirestoreRuntime() {
+  firestoreRuntimeDisabled = true;
 }
 
 function getErrorDetails(error: unknown): { name: string; message: string; stack?: string } {
@@ -137,6 +154,10 @@ function getErrorDetails(error: unknown): { name: string; message: string; stack
     name: typeof error,
     message: String(error)
   };
+}
+
+function isMissingDefaultCredentialsError(error: unknown): boolean {
+  return error instanceof Error && error.message.includes("Could not load the default credentials");
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -320,6 +341,53 @@ function buildMemoryContext(sessions: SessionRecord[]): string | null {
   return memoryContext.slice(0, 300);
 }
 
+function saveDailySessionToMemory(session: DailySession): DailySession {
+  inMemoryDailySessions.set(session.id, session);
+  return session;
+}
+
+async function loadFallbackDailySessions(): Promise<DailySession[]> {
+  try {
+    const text = await readFile(DAILY_SESSIONS_FALLBACK_PATH, "utf8");
+    const sessions = JSON.parse(text) as DailySession[];
+    if (!Array.isArray(sessions)) {
+      return [];
+    }
+
+    return sessions;
+  } catch {
+    return [];
+  }
+}
+
+async function persistFallbackDailySessions(sessions: DailySession[]): Promise<void> {
+  await writeFile(DAILY_SESSIONS_FALLBACK_PATH, JSON.stringify(sessions, null, 2), "utf8");
+}
+
+async function saveDailySessionToFallback(session: DailySession): Promise<DailySession> {
+  saveDailySessionToMemory(session);
+  const sessions = await loadFallbackDailySessions();
+  const nextSessions = sessions.filter((item) => item.id !== session.id);
+  nextSessions.push(session);
+  await persistFallbackDailySessions(nextSessions);
+  return session;
+}
+
+async function getLatestDailySessionFromFallback(): Promise<DailySession | null> {
+  const fileSessions = await loadFallbackDailySessions();
+  const memorySessions = Array.from(inMemoryDailySessions.values());
+  const sessions = [...fileSessions, ...memorySessions].reduce<Map<string, DailySession>>((map, session) => {
+    map.set(session.id, session);
+    return map;
+  }, new Map());
+
+  const sortedSessions = Array.from(sessions.values()).sort((left, right) => {
+    return (right.created_at ?? "").localeCompare(left.created_at ?? "");
+  });
+
+  return sortedSessions[0] ?? null;
+}
+
 function buildMemoryMessageHint(summary: Omit<MemorySummary, "memoryMessageHint">): string {
   if (summary.repeatedMisunderstandingDetected && summary.mostRepeatedMisunderstanding) {
     const misunderstandingLabel = getMisunderstandingLabel(summary.mostRepeatedMisunderstanding);
@@ -416,6 +484,9 @@ export async function saveDeliberationSession({ learnerCase, deliberation }: Sav
       .set(sessionPayload);
     console.info("[firestore] session saved");
   } catch (error) {
+    if (isMissingDefaultCredentialsError(error)) {
+      disableFirestoreRuntime();
+    }
     console.warn("[firestore] save session skipped", getErrorDetails(error));
   }
 }
@@ -428,12 +499,22 @@ export async function createDailySession({
   reviewStatus = "pending"
 }: SaveDailySessionInput): Promise<DailySession | null> {
   const firestore = await getFirestoreClient();
+  const sessionId = crypto.randomUUID();
+  const fallbackSession: DailySession = {
+    id: sessionId,
+    created_at: new Date().toISOString(),
+    status,
+    question_ids: questionIds,
+    current_index: currentIndex,
+    observation_count: observationCount,
+    review_status: reviewStatus
+  };
+
   if (!firestore) {
-    return null;
+    return saveDailySessionToFallback(fallbackSession);
   }
 
   try {
-    const sessionId = crypto.randomUUID();
     const sessionPayload = removeUndefinedDeep({
       status,
       question_ids: questionIds,
@@ -447,17 +528,99 @@ export async function createDailySession({
     console.info("[firestore] daily session created");
 
     return {
-      id: sessionId,
-      created_at: null,
-      status,
-      question_ids: questionIds,
-      current_index: currentIndex,
-      observation_count: observationCount,
-      review_status: reviewStatus
+      ...fallbackSession,
+      created_at: null
     };
   } catch (error) {
+    if (isMissingDefaultCredentialsError(error)) {
+      disableFirestoreRuntime();
+    }
     console.warn("[firestore] create daily session skipped", getErrorDetails(error));
-    return null;
+    return saveDailySessionToFallback(fallbackSession);
+  }
+}
+
+export async function advanceDailySession({ sessionId }: AdvanceDailySessionInput): Promise<DailySession | null> {
+  const firestore = await getFirestoreClient();
+  if (!firestore) {
+    const currentSession =
+      inMemoryDailySessions.get(sessionId) ??
+      (await loadFallbackDailySessions()).find((session) => session.id === sessionId) ??
+      null;
+    if (!currentSession) {
+      return null;
+    }
+
+    const nextObservationCount = currentSession.observation_count + 1;
+    const nextIndex = Math.min(currentSession.current_index + 1, currentSession.question_ids.length);
+    const isCompleted = nextIndex >= currentSession.question_ids.length;
+    const nextStatus: DailySessionStatus = isCompleted ? "completed" : "active";
+
+    return saveDailySessionToFallback({
+      ...currentSession,
+      current_index: nextIndex,
+      observation_count: nextObservationCount,
+      status: nextStatus
+    });
+  }
+
+  try {
+    const sessionRef = firestore.collection(DAILY_SESSIONS_COLLECTION).doc(sessionId);
+    const snapshot = await sessionRef.get();
+
+    if (!snapshot.exists) {
+      return null;
+    }
+
+    const currentSession = toSerializableDailySession(snapshot as QueryDocumentSnapshot);
+    if (!currentSession) {
+      return null;
+    }
+
+    const nextObservationCount = currentSession.observation_count + 1;
+    const nextIndex = Math.min(currentSession.current_index + 1, currentSession.question_ids.length);
+    const isCompleted = nextIndex >= currentSession.question_ids.length;
+    const nextStatus: DailySessionStatus = isCompleted ? "completed" : "active";
+
+    await sessionRef.set(
+      removeUndefinedDeep({
+        current_index: nextIndex,
+        observation_count: nextObservationCount,
+        status: nextStatus
+      }),
+      { merge: true }
+    );
+
+    return {
+      ...currentSession,
+      current_index: nextIndex,
+      observation_count: nextObservationCount,
+      status: nextStatus
+    };
+  } catch (error) {
+    if (isMissingDefaultCredentialsError(error)) {
+      disableFirestoreRuntime();
+    }
+    console.warn("[firestore] advance daily session skipped", getErrorDetails(error));
+    const currentSession =
+      inMemoryDailySessions.get(sessionId) ??
+      (await loadFallbackDailySessions()).find((session) => session.id === sessionId) ??
+      null;
+    if (!currentSession) {
+      return null;
+    }
+
+    const nextObservationCount = currentSession.observation_count + 1;
+    const nextIndex = Math.min(currentSession.current_index + 1, currentSession.question_ids.length);
+    const isCompleted = nextIndex >= currentSession.question_ids.length;
+    const nextStatus: DailySessionStatus = isCompleted ? "completed" : "active";
+
+    return saveDailySessionToFallback({
+      ...currentSession,
+      current_index: nextIndex,
+      observation_count: nextObservationCount,
+      status: nextStatus
+    });
   }
 }
 
@@ -488,6 +651,9 @@ export async function getRecentSessions(limit = RECENT_SESSION_LIMIT): Promise<S
 
     return sessions;
   } catch (error) {
+    if (isMissingDefaultCredentialsError(error)) {
+      disableFirestoreRuntime();
+    }
     console.warn("[firestore] recent sessions lookup skipped", getErrorDetails(error));
     return [];
   }
@@ -501,7 +667,7 @@ export async function getLatestSession(): Promise<SessionRecord | null> {
 export async function getLatestDailySession(): Promise<DailySession | null> {
   const firestore = await getFirestoreClient();
   if (!firestore) {
-    return null;
+    return getLatestDailySessionFromFallback();
   }
 
   try {
@@ -517,8 +683,11 @@ export async function getLatestDailySession(): Promise<DailySession | null> {
 
     return toSerializableDailySession(snapshot.docs[0]);
   } catch (error) {
+    if (isMissingDefaultCredentialsError(error)) {
+      disableFirestoreRuntime();
+    }
     console.warn("[firestore] latest daily session lookup skipped", getErrorDetails(error));
-    return null;
+    return getLatestDailySessionFromFallback();
   }
 }
 
