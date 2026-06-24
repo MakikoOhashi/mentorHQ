@@ -16,12 +16,6 @@ type CoachWorkspaceProps = {
   initialCase: LearnerCase;
 };
 
-type StreamEvent = {
-  id: string;
-  event: DeliberationEvent;
-  phase: "live" | "exiting";
-};
-
 type DailySessionPayload = {
   session: DailySession;
   learnerCase: LearnerCase | null;
@@ -31,63 +25,11 @@ type DailySessionPayload = {
   latestObservation: ObservationEvent | null;
 };
 
-const agentIcons: Record<string, string> = {
-  misconception: "🧠",
-  memory: "🔁",
-  load: "⚖️",
-  coach: "🎓"
-};
-
-const shortSpeakerLabels: Record<string, string> = {
-  misconception: "誤解担当",
-  memory: "記憶担当",
-  load: "負荷担当",
-  coach: "コーチ"
-};
-
-function formatSpeakerName(event: DeliberationEvent) {
-  return shortSpeakerLabels[event.speaker] ?? event.speaker_label;
-}
-
-function getTone(event: DeliberationEvent) {
-  if (event.speaker === "coach") return "consensus";
-  if (event.type === "revision") return "primary";
-  if (event.type === "challenge") return "primary";
-  if (event.type === "recommendation") return "consensus";
-  return "support";
-}
-
-function formatDecisionLabel(value?: string | null) {
-  if (!value) return "Deliberation 完了後に表示されます";
-  if (value === "starting_point_check") return "起算点の確認から入る";
-  if (value === "contrast_check") return "比較でズレをあぶり出す";
-  if (value === "leg_breakdown") return "肢を分けて読み直す";
-  if (value === "integrated_retry") return "理解をまとめて再挑戦する";
-  return value;
-}
-
-function getStreamStatus(status: "idle" | "loading" | "streaming" | "done" | "error") {
-  if (status === "done") {
-    return {
-      kicker: "Decision Reached",
-      title: "Agent Deliberation",
-      pill: "Decision Reached"
-    };
-  }
-
-  if (status === "error") {
-    return {
-      kicker: "Deliberation Error",
-      title: "Agent Deliberation",
-      pill: "Error"
-    };
-  }
-
-  return {
-    kicker: "Agent Deliberation",
-    title: "Thinking...",
-    pill: "Thinking..."
-  };
+function getObservationIcon(observation: ObservationEvent) {
+  if (observation.intervention_type === "starting_point_check") return "🧠";
+  if (observation.intervention_type === "contrast_check") return "🔁";
+  if (observation.intervention_type === "integrated_retry") return "⚖️";
+  return "📝";
 }
 
 const EVENT_DURATIONS: Record<DeliberationEvent["type"], number> = {
@@ -97,9 +39,6 @@ const EVENT_DURATIONS: Record<DeliberationEvent["type"], number> = {
   recommendation: 2000,
   coach_decision: 3000
 };
-
-const MAX_VISIBLE_EVENTS = 5;
-const EXIT_ANIMATION_MS = 420;
 
 function getCumulativeEventDelay(events: DeliberationEvent[], index: number) {
   let total = 350;
@@ -115,17 +54,16 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const [learnerCase, setLearnerCase] = useState(initialCase);
   const [dailySession, setDailySession] = useState<DailySession | null>(null);
   const [currentQuestionId, setCurrentQuestionId] = useState<string | null>(null);
+  const [observations, setObservations] = useState<ObservationEvent[]>([]);
   const [latestObservation, setLatestObservation] = useState<ObservationEvent | null>(null);
   const [sessionStatusMessage, setSessionStatusMessage] = useState<string>("開始前です。");
   const [events, setEvents] = useState<DeliberationEvent[]>([]);
-  const [streamEvents, setStreamEvents] = useState<StreamEvent[]>([]);
   const [decision, setDecision] = useState<CoachDecision | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "streaming" | "done" | "error">("idle");
   const [sessionActionStatus, setSessionActionStatus] = useState<"idle" | "starting" | "advancing">("idle");
   const [mode, setMode] = useState<"mock" | "ai">("mock");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const timeoutIdsRef = useRef<number[]>([]);
-  const sequenceRef = useRef(0);
 
   const clearScheduledUpdates = useCallback(() => {
     timeoutIdsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
@@ -136,10 +74,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     clearScheduledUpdates();
     setStatus("loading");
     setEvents([]);
-    setStreamEvents([]);
     setDecision(null);
     setErrorMessage(null);
-    sequenceRef.current = 0;
 
     try {
       const response = await fetch("/api/deliberate", {
@@ -161,28 +97,6 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       payload.deliberation_events.forEach((event, index) => {
         const timeoutId = window.setTimeout(() => {
           setEvents((current) => [...current, event]);
-          sequenceRef.current += 1;
-
-          const streamId = `${event.speaker}-${event.round}-${sequenceRef.current}`;
-          setStreamEvents((current) => {
-            const next = [...current, { id: streamId, event, phase: "live" as const }];
-
-            if (next.length > MAX_VISIBLE_EVENTS) {
-              const oldestLiveIndex = next.findIndex((item) => item.phase === "live");
-
-              if (oldestLiveIndex >= 0) {
-                const exitingId = next[oldestLiveIndex].id;
-                next[oldestLiveIndex] = { ...next[oldestLiveIndex], phase: "exiting" };
-
-                const removalTimeoutId = window.setTimeout(() => {
-                  setStreamEvents((rendered) => rendered.filter((item) => item.id !== exitingId));
-                }, EXIT_ANIMATION_MS);
-                timeoutIdsRef.current.push(removalTimeoutId);
-              }
-            }
-
-            return next;
-          });
 
           if (index === payload.deliberation_events.length - 1) {
             const decisionTimeoutId = window.setTimeout(() => {
@@ -208,6 +122,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     (payload: DailySessionPayload) => {
       setDailySession(payload.session);
       setCurrentQuestionId(payload.currentQuestionId);
+      setObservations(payload.observations);
       setLatestObservation(payload.latestObservation);
       setSessionStatusMessage(
         payload.session.status === "completed"
@@ -222,7 +137,6 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       if (payload.session.status === "completed") {
         clearScheduledUpdates();
         setEvents([]);
-        setStreamEvents([]);
         setDecision(null);
         setStatus("idle");
         setErrorMessage(null);
@@ -303,9 +217,6 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     }
   }, [applyDailySessionPayload, currentQuestionId, dailySession, decision, events, runDeliberation]);
 
-  const visibleLiveCount = streamEvents.filter((item) => item.phase !== "exiting").length;
-
-  const streamStatus = getStreamStatus(status);
   const completedQuestionCount = dailySession
     ? Math.min(dailySession.current_index, dailySession.question_ids.length)
     : 0;
@@ -322,7 +233,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       <section className="hero">
         <div>
           <p className="eyebrow">MentorHQ MVP Demo</p>
-          <h1>Agent Deliberation Workspace</h1>
+          <h1>Daily Observation Workspace</h1>
         </div>
         <div className="hero-meta">
           <span>{learnerCase.exam}</span>
@@ -373,14 +284,6 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                 <span className="summary-label">表示</span>
                 <div className="reflection-box">{sessionStatusMessage}</div>
               </div>
-              <div>
-                <span className="summary-label">Latest Observation</span>
-                <div className="reflection-box">
-                  {latestObservation
-                    ? `${latestObservation.note} (${latestObservation.intervention_type})`
-                    : "観察ログはまだありません。"}
-                </div>
-              </div>
             </div>
             <button
               className="primary-button"
@@ -412,9 +315,9 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
           <article className="panel compact answer-panel">
             <div className="panel-heading tight">
               <span className="panel-kicker">Run Control</span>
-              <h3>Deliberation を再実行</h3>
+              <h3>Observation を更新</h3>
             </div>
-            <p className="body-copy compact-copy">短い発言を流しながら、次の一問を絞り込みます。</p>
+            <p className="body-copy compact-copy">裏側の deliberation を再実行して、観察の下地を更新します。</p>
             <button
               className="primary-button"
               onClick={() => void runDeliberation()}
@@ -429,106 +332,71 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
 
         <div className="column">
           <div className="column-header">
-            <p className="eyebrow">Agent Deliberation Stream</p>
-            <h2>AIスタッフ会議の実況</h2>
+            <p className="eyebrow">Observation Stream</p>
+            <h2>AIが裏側で記録した観察</h2>
           </div>
 
-          <article className="panel discussion-panel">
-            <div className="panel-heading tight discussion-heading">
+          <article className="panel observation-stream-panel">
+            <div className="panel-heading tight observation-stream-heading">
               <div>
-                <span className="panel-kicker">{streamStatus.kicker}</span>
-                <h3>{streamStatus.title}</h3>
+                <span className="panel-kicker">Observation Stream</span>
+                <h3>まだ判断せず、傾向だけを残します</h3>
               </div>
-              <span className="live-pill">{streamStatus.pill}</span>
+              <span className="observation-count-pill">
+                {dailySession ? `${dailySession.observation_count} observations` : "0 observations"}
+              </span>
             </div>
 
-            <div className="stream-viewport">
-              <div className="discussion-timeline chat-timeline">
-                {streamEvents.length === 0 ? (
-                  <div className="pending-row">会議が立ち上がるのを待っています…</div>
-                ) : null}
+            {latestObservation ? (
+              <section className="latest-observation-card">
+                <div className="latest-observation-label">Latest Observation</div>
+                <div className="latest-observation-row">
+                  <span className="observation-icon" aria-hidden="true">
+                    {getObservationIcon(latestObservation)}
+                  </span>
+                  <div>
+                    <p className="latest-observation-note">{latestObservation.note}</p>
+                    <p className="latest-observation-meta">
+                      可能性だけを残し、まだ判断しません。
+                    </p>
+                  </div>
+                </div>
+              </section>
+            ) : null}
 
-                {streamEvents.map(({ id, event, phase }, index) => {
-                  const liveIndex = streamEvents
-                    .filter((item) => item.phase !== "exiting")
-                    .findIndex((item) => item.id === id);
-                  const age = liveIndex >= 0 ? visibleLiveCount - liveIndex - 1 : MAX_VISIBLE_EVENTS;
-                  const isLatest = phase !== "exiting" && age === 0;
-                  const isPrevious = phase !== "exiting" && age === 1;
-
-                  return (
-                  <section
-                    className={`discussion-row chat-row tone-${getTone(event)} ${
-                      event.type === "revision" ? "is-revision" : ""
-                    } ${event.type === "coach_decision" ? "is-coach-decision" : ""} ${
-                      phase === "exiting" ? "is-exiting" : ""
-                    } ${isLatest ? "is-latest" : ""} ${isPrevious ? "is-previous" : ""} stream-depth-${Math.min(
-                      age,
-                      MAX_VISIBLE_EVENTS - 1
-                    )}`}
-                    key={id}
-                  >
-                    <div className="discussion-avatar" aria-hidden="true">
-                      {agentIcons[event.speaker]}
-                    </div>
-                    <div className="discussion-bubble">
-                      <div className="discussion-meta">
-                        <span className="discussion-agent">{formatSpeakerName(event)}</span>
-                        {event.type === "revision" ? <span className="discussion-role">考えが変わった</span> : null}
+            <div className="observation-stream-viewport">
+              <div className="observation-list">
+                {observations.length === 0 ? (
+                  <div className="observation-empty-state">
+                    <p>まだ観察はありません。</p>
+                    <p>回答が進むと、AIが裏側で学習傾向を記録します。</p>
+                  </div>
+                ) : (
+                  observations.map((observation) => (
+                    <section
+                      className={`observation-row ${latestObservation?.id === observation.id ? "is-latest-observation" : ""}`}
+                      key={observation.id}
+                    >
+                      <div className="observation-icon" aria-hidden="true">
+                        {getObservationIcon(observation)}
                       </div>
-
-                      <p>{event.message}</p>
-
-                      {event.type === "revision" &&
-                      event.confidence_before !== undefined &&
-                      event.confidence_after !== undefined ? (
-                        <div className="revision-block" aria-label="confidence revision">
-                          <span className="revision-icon" aria-hidden="true">
-                            🧠
-                          </span>
-                          <span className="revision-shift">見解更新</span>
-                          <span className="delta-chip revision-delta">
-                            {`${Math.round(event.confidence_before * 100)}% → ${Math.round(
-                              event.confidence_after * 100
-                            )}%`}
+                      <div className="observation-bubble">
+                        <p>{observation.note}</p>
+                        <div className="observation-meta-row">
+                          <span>{observation.intervention_type}</span>
+                          <span>{observation.misunderstanding_type}</span>
+                          <span>
+                            {observation.confidence !== null
+                              ? `${Math.round(observation.confidence * 100)}% confidence`
+                              : "confidence pending"}
                           </span>
                         </div>
-                      ) : null}
-                    </div>
-                  </section>
-                  );
-                })}
-
-                {status === "streaming" || status === "loading" ? (
-                  <div className="pending-row">次のひと言を考えています…</div>
-                ) : null}
+                      </div>
+                    </section>
+                  ))
+                )}
               </div>
             </div>
-          </article>
-
-          <article className="panel spotlight decision-panel">
-            <div className="decision-hero">
-              <div>
-                <span className="panel-kicker">Coach Decision</span>
-                <h3>{formatDecisionLabel(decision?.selected_intervention)}</h3>
-              </div>
-              <p className="decision-reached-label">
-                {decision ? "Decision Reached" : "議論がまとまるとここに着地します"}
-              </p>
-              <p className="decision-summary">
-                {decision?.reason ?? "最後にコーチがひとつに決め切ります。"}
-              </p>
-            </div>
-          </article>
-
-          <article className="panel next-question-panel">
-            <div className="panel-heading tight">
-              <span className="panel-kicker">Next Question</span>
-              <h3>学習者へ返す次の一問</h3>
-            </div>
-            <p className="next-question-copy">
-              {decision?.next_question ?? "Coach Decision の完了後に、ここへ固定表示されます。"}
-            </p>
             <button
               className="primary-button secondary-button"
               onClick={() => void advanceToNextQuestion()}
@@ -538,8 +406,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
               {sessionActionStatus === "advancing"
                 ? "Advancing..."
                 : isFinalActiveQuestion
-                  ? "この問題でセッション完了"
-                  : "この問題を完了して次へ"}
+                  ? "この回答を記録して完了"
+                  : "この回答を記録して次へ"}
             </button>
           </article>
         </div>
