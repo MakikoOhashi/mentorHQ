@@ -89,3 +89,33 @@ export type DailySession = {
   observation_count: number;
   review_status: DailyReviewStatus;
 };
+
+export const OBSERVATION_MISUNDERSTANDING_TYPES = [
+  "starting_point_confusion",
+  "condition_omission",
+  "unknown"
+] as const;
+
+export type ObservationMisunderstandingType = (typeof OBSERVATION_MISUNDERSTANDING_TYPES)[number];
+
+export type ObservationEvent = {
+  id: string;
+  daily_session_id: string;
+  question_id: string;
+  question_index: number;
+  intervention_type: SelectedIntervention;
+  misunderstanding_type: ObservationMisunderstandingType;
+  confidence: number | null;
+  note: string;
+  created_at: string | null;
+};
+
+export type ObservationEventInput = {
+  daily_session_id: string;
+  question_id: string;
+  question_index: number;
+  intervention_type: SelectedIntervention;
+  misunderstanding_type: ObservationMisunderstandingType;
+  confidence: number | null;
+  note: string;
+};

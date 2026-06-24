@@ -5,8 +5,11 @@ import type {
   DailySessionStatus,
   DeliberationEvent,
   DeliberationResponse,
-  LearnerCase
+  LearnerCase,
+  ObservationEvent,
+  ObservationEventInput
 } from "@/lib/deliberation/types";
+import { detectMisunderstandingTypeFromDeliberation } from "@/lib/deliberation/observation";
 import { applicationDefault, getApp, getApps, initializeApp } from "firebase-admin/app";
 import { FieldValue, getFirestore, type Firestore, type QueryDocumentSnapshot, type Timestamp } from "firebase-admin/firestore";
 import { readFile, writeFile } from "node:fs/promises";
@@ -52,13 +55,17 @@ export type SaveDailySessionInput = {
 
 export type AdvanceDailySessionInput = {
   sessionId: string;
+  observation?: ObservationEventInput;
 };
 
 const SESSIONS_COLLECTION = "sessions";
 const DAILY_SESSIONS_COLLECTION = "daily_sessions";
+const OBSERVATION_EVENTS_COLLECTION = "observation_events";
 const RECENT_SESSION_LIMIT = 5;
 const inMemoryDailySessions = new Map<string, DailySession>();
+const inMemoryObservationEvents = new Map<string, ObservationEvent>();
 const DAILY_SESSIONS_FALLBACK_PATH = join("/tmp", "mentorhq-daily-sessions.json");
+const OBSERVATION_EVENTS_FALLBACK_PATH = join("/tmp", "mentorhq-observation-events.json");
 
 function getInterventionLabel(intervention: DeliberationResponse["coach_decision"]["selected_intervention"]): string {
   switch (intervention) {
@@ -88,41 +95,11 @@ function getMisunderstandingLabel(misunderstandingType: string | null): string {
   }
 }
 
-function eventTexts(deliberationEvents: DeliberationEvent[]): string {
-  return deliberationEvents
-    .filter((event) => event.speaker === "misconception" || event.type === "revision")
-    .map((event) => `${event.hypothesis ?? ""} ${event.message}`)
-    .join(" ")
-    .toLowerCase();
-}
-
 function detectMisunderstandingTypeFromParts(
   coachDecision: CoachDecision,
   deliberationEvents: DeliberationEvent[]
 ): MisunderstandingType {
-  const text = eventTexts(deliberationEvents);
-  const startingPointCueCount = [
-    coachDecision.selected_intervention === "starting_point_check" || false,
-    /起算点/g.test(text),
-    /いつから/g.test(text),
-    /知った時/g.test(text)
-  ].filter(Boolean).length;
-  const conditionCueCount = [/条件/g.test(text), /読み落とし/g.test(text), /見落とし/g.test(text)].filter(Boolean)
-    .length;
-
-  if (conditionCueCount >= 2) {
-    return "condition_omission";
-  }
-
-  if (startingPointCueCount >= 1) {
-    return "starting_point_confusion";
-  }
-
-  if (conditionCueCount >= 1) {
-    return "condition_omission";
-  }
-
-  return "unknown";
+  return detectMisunderstandingTypeFromDeliberation(coachDecision, deliberationEvents);
 }
 
 let firestorePromise: Promise<Firestore | null> | null = null;
@@ -280,12 +257,52 @@ function toSerializableDailySession(snapshot: QueryDocumentSnapshot): DailySessi
   };
 }
 
+function toSerializableObservationEvent(snapshot: QueryDocumentSnapshot): ObservationEvent | null {
+  const data = snapshot.data();
+
+  if (
+    typeof data.daily_session_id !== "string" ||
+    typeof data.question_id !== "string" ||
+    typeof data.question_index !== "number" ||
+    !isSelectedIntervention(data.intervention_type) ||
+    !isObservationMisunderstandingType(data.misunderstanding_type) ||
+    typeof data.note !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    id: snapshot.id,
+    daily_session_id: data.daily_session_id,
+    question_id: data.question_id,
+    question_index: data.question_index,
+    intervention_type: data.intervention_type,
+    misunderstanding_type: data.misunderstanding_type,
+    confidence: typeof data.confidence === "number" ? data.confidence : null,
+    note: data.note,
+    created_at: toSerializableCreatedAt(data.created_at)
+  };
+}
+
 function isDailySessionStatus(value: unknown): value is DailySessionStatus {
   return value === "draft" || value === "active" || value === "completed";
 }
 
 function isDailyReviewStatus(value: unknown): value is DailyReviewStatus {
   return value === "pending" || value === "ready";
+}
+
+function isSelectedIntervention(value: unknown): value is ObservationEvent["intervention_type"] {
+  return (
+    value === "leg_breakdown" ||
+    value === "contrast_check" ||
+    value === "starting_point_check" ||
+    value === "integrated_retry"
+  );
+}
+
+function isObservationMisunderstandingType(value: unknown): value is ObservationEvent["misunderstanding_type"] {
+  return value === "starting_point_confusion" || value === "condition_omission" || value === "unknown";
 }
 
 function formatCounts(items: string[]): string[] {
@@ -371,6 +388,57 @@ async function saveDailySessionToFallback(session: DailySession): Promise<DailyS
   nextSessions.push(session);
   await persistFallbackDailySessions(nextSessions);
   return session;
+}
+
+function saveObservationEventToMemory(event: ObservationEvent): ObservationEvent {
+  inMemoryObservationEvents.set(event.id, event);
+  return event;
+}
+
+async function loadFallbackObservationEvents(): Promise<ObservationEvent[]> {
+  try {
+    const text = await readFile(OBSERVATION_EVENTS_FALLBACK_PATH, "utf8");
+    const events = JSON.parse(text) as ObservationEvent[];
+    if (!Array.isArray(events)) {
+      return [];
+    }
+
+    return events;
+  } catch {
+    return [];
+  }
+}
+
+async function persistFallbackObservationEvents(events: ObservationEvent[]): Promise<void> {
+  await writeFile(OBSERVATION_EVENTS_FALLBACK_PATH, JSON.stringify(events, null, 2), "utf8");
+}
+
+async function saveObservationEventToFallback(event: ObservationEvent): Promise<ObservationEvent> {
+  saveObservationEventToMemory(event);
+  const events = await loadFallbackObservationEvents();
+  const nextEvents = events.filter((item) => item.id !== event.id);
+  nextEvents.push(event);
+  await persistFallbackObservationEvents(nextEvents);
+  return event;
+}
+
+async function getObservationEventsFromFallback(dailySessionId: string): Promise<ObservationEvent[]> {
+  const fileEvents = await loadFallbackObservationEvents();
+  const memoryEvents = Array.from(inMemoryObservationEvents.values());
+  const dedupedEvents = [...fileEvents, ...memoryEvents].reduce<Map<string, ObservationEvent>>((map, event) => {
+    map.set(event.id, event);
+    return map;
+  }, new Map());
+
+  return Array.from(dedupedEvents.values())
+    .filter((event) => event.daily_session_id === dailySessionId)
+    .sort((left, right) => {
+      if ((left.created_at ?? "") === (right.created_at ?? "")) {
+        return left.question_index - right.question_index;
+      }
+
+      return (left.created_at ?? "").localeCompare(right.created_at ?? "");
+    });
 }
 
 async function getLatestDailySessionFromFallback(): Promise<DailySession | null> {
@@ -540,7 +608,54 @@ export async function createDailySession({
   }
 }
 
-export async function advanceDailySession({ sessionId }: AdvanceDailySessionInput): Promise<DailySession | null> {
+async function createObservationEvent(observation: ObservationEventInput): Promise<ObservationEvent | null> {
+  const firestore = await getFirestoreClient();
+  const eventId = crypto.randomUUID();
+  const fallbackEvent: ObservationEvent = {
+    id: eventId,
+    daily_session_id: observation.daily_session_id,
+    question_id: observation.question_id,
+    question_index: observation.question_index,
+    intervention_type: observation.intervention_type,
+    misunderstanding_type: observation.misunderstanding_type,
+    confidence: observation.confidence,
+    note: observation.note,
+    created_at: new Date().toISOString()
+  };
+
+  if (!firestore) {
+    return saveObservationEventToFallback(fallbackEvent);
+  }
+
+  try {
+    const payload = removeUndefinedDeep({
+      daily_session_id: observation.daily_session_id,
+      question_id: observation.question_id,
+      question_index: observation.question_index,
+      intervention_type: observation.intervention_type,
+      misunderstanding_type: observation.misunderstanding_type,
+      confidence: observation.confidence,
+      note: observation.note,
+      created_at: FieldValue.serverTimestamp()
+    });
+
+    await firestore.collection(OBSERVATION_EVENTS_COLLECTION).doc(eventId).set(payload);
+    console.info("[firestore] observation event created");
+
+    return {
+      ...fallbackEvent,
+      created_at: null
+    };
+  } catch (error) {
+    if (isMissingDefaultCredentialsError(error)) {
+      disableFirestoreRuntime();
+    }
+    console.warn("[firestore] create observation event skipped", getErrorDetails(error));
+    return saveObservationEventToFallback(fallbackEvent);
+  }
+}
+
+export async function advanceDailySession({ sessionId, observation }: AdvanceDailySessionInput): Promise<DailySession | null> {
   const firestore = await getFirestoreClient();
   if (!firestore) {
     const currentSession =
@@ -551,7 +666,8 @@ export async function advanceDailySession({ sessionId }: AdvanceDailySessionInpu
       return null;
     }
 
-    const nextObservationCount = currentSession.observation_count + 1;
+    const savedObservation = observation ? await createObservationEvent(observation) : null;
+    const nextObservationCount = currentSession.observation_count + (savedObservation ? 1 : 0);
     const nextIndex = Math.min(currentSession.current_index + 1, currentSession.question_ids.length);
     const isCompleted = nextIndex >= currentSession.question_ids.length;
     const nextStatus: DailySessionStatus = isCompleted ? "completed" : "active";
@@ -577,7 +693,8 @@ export async function advanceDailySession({ sessionId }: AdvanceDailySessionInpu
       return null;
     }
 
-    const nextObservationCount = currentSession.observation_count + 1;
+    const savedObservation = observation ? await createObservationEvent(observation) : null;
+    const nextObservationCount = currentSession.observation_count + (savedObservation ? 1 : 0);
     const nextIndex = Math.min(currentSession.current_index + 1, currentSession.question_ids.length);
     const isCompleted = nextIndex >= currentSession.question_ids.length;
     const nextStatus: DailySessionStatus = isCompleted ? "completed" : "active";
@@ -610,7 +727,8 @@ export async function advanceDailySession({ sessionId }: AdvanceDailySessionInpu
       return null;
     }
 
-    const nextObservationCount = currentSession.observation_count + 1;
+    const savedObservation = observation ? await createObservationEvent(observation) : null;
+    const nextObservationCount = currentSession.observation_count + (savedObservation ? 1 : 0);
     const nextIndex = Math.min(currentSession.current_index + 1, currentSession.question_ids.length);
     const isCompleted = nextIndex >= currentSession.question_ids.length;
     const nextStatus: DailySessionStatus = isCompleted ? "completed" : "active";
@@ -621,6 +739,35 @@ export async function advanceDailySession({ sessionId }: AdvanceDailySessionInpu
       observation_count: nextObservationCount,
       status: nextStatus
     });
+  }
+}
+
+export async function getObservationEventsForDailySession(dailySessionId: string): Promise<ObservationEvent[]> {
+  const firestore = await getFirestoreClient();
+  if (!firestore) {
+    return getObservationEventsFromFallback(dailySessionId);
+  }
+
+  try {
+    const snapshot = await firestore
+      .collection(OBSERVATION_EVENTS_COLLECTION)
+      .where("daily_session_id", "==", dailySessionId)
+      .orderBy("question_index", "asc")
+      .get();
+
+    if (snapshot.empty) {
+      return [];
+    }
+
+    return snapshot.docs
+      .map((eventSnapshot) => toSerializableObservationEvent(eventSnapshot))
+      .filter((event): event is ObservationEvent => event !== null);
+  } catch (error) {
+    if (isMissingDefaultCredentialsError(error)) {
+      disableFirestoreRuntime();
+    }
+    console.warn("[firestore] observation events lookup skipped", getErrorDetails(error));
+    return getObservationEventsFromFallback(dailySessionId);
   }
 }
 

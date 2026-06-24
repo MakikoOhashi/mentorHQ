@@ -21,6 +21,7 @@ MentorHQ の MVP では、共有事実・派生状態・Agent 出力・Coach 決
 - question
 - question_leg
 - answer_event
+- observation_event
 - reflection_event
 - session_event
 
@@ -31,6 +32,7 @@ MentorHQ の MVP では、共有事実・派生状態・Agent 出力・Coach 決
 - question.id
 - question_leg.leg_index
 - answer_event.selected_judgment
+- observation_event.intervention_type
 - answer_event.answered_at
 - reflection_event.text
 - session_event.phase
@@ -142,6 +144,18 @@ Coach の最終判断を保持する。
 - selected_judgment
 - confidence_self_report
 - answered_at
+
+### `observation_event`
+
+- observation_event_id
+- daily_session_id
+- question_id
+- question_index
+- intervention_type
+- misunderstanding_type
+- confidence
+- note
+- created_at
 
 ### `reflection_event`
 

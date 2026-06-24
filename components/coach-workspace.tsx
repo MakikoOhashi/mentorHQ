@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { buildObservationInput } from "@/lib/deliberation/observation";
 import type {
   CoachDecision,
   DailySession,
   DeliberationEvent,
   DeliberationResponse,
-  LearnerCase
+  LearnerCase,
+  ObservationEvent
 } from "@/lib/deliberation/types";
 
 type CoachWorkspaceProps = {
@@ -25,6 +27,8 @@ type DailySessionPayload = {
   learnerCase: LearnerCase | null;
   currentQuestionId: string | null;
   totalQuestions: number;
+  observations: ObservationEvent[];
+  latestObservation: ObservationEvent | null;
 };
 
 const agentIcons: Record<string, string> = {
@@ -110,6 +114,8 @@ function getCumulativeEventDelay(events: DeliberationEvent[], index: number) {
 export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const [learnerCase, setLearnerCase] = useState(initialCase);
   const [dailySession, setDailySession] = useState<DailySession | null>(null);
+  const [currentQuestionId, setCurrentQuestionId] = useState<string | null>(null);
+  const [latestObservation, setLatestObservation] = useState<ObservationEvent | null>(null);
   const [sessionStatusMessage, setSessionStatusMessage] = useState<string>("開始前です。");
   const [events, setEvents] = useState<DeliberationEvent[]>([]);
   const [streamEvents, setStreamEvents] = useState<StreamEvent[]>([]);
@@ -201,6 +207,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const applyDailySessionPayload = useCallback(
     (payload: DailySessionPayload) => {
       setDailySession(payload.session);
+      setCurrentQuestionId(payload.currentQuestionId);
+      setLatestObservation(payload.latestObservation);
       setSessionStatusMessage(
         payload.session.status === "completed"
           ? "今日の3問セッションは完了しました。"
@@ -263,7 +271,19 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ sessionId: dailySession.id })
+        body: JSON.stringify({
+          sessionId: dailySession.id,
+          observation:
+            currentQuestionId && decision
+              ? buildObservationInput({
+                  dailySessionId: dailySession.id,
+                  questionId: currentQuestionId,
+                  questionIndex: dailySession.current_index,
+                  coachDecision: decision,
+                  deliberationEvents: events
+                })
+              : undefined
+        })
       });
 
       if (!response.ok) {
@@ -281,7 +301,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     } finally {
       setSessionActionStatus("idle");
     }
-  }, [applyDailySessionPayload, dailySession, runDeliberation]);
+  }, [applyDailySessionPayload, currentQuestionId, dailySession, decision, events, runDeliberation]);
 
   const visibleLiveCount = streamEvents.filter((item) => item.phase !== "exiting").length;
 
@@ -352,6 +372,14 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
               <div>
                 <span className="summary-label">表示</span>
                 <div className="reflection-box">{sessionStatusMessage}</div>
+              </div>
+              <div>
+                <span className="summary-label">Latest Observation</span>
+                <div className="reflection-box">
+                  {latestObservation
+                    ? `${latestObservation.note} (${latestObservation.intervention_type})`
+                    : "観察ログはまだありません。"}
+                </div>
               </div>
             </div>
             <button
