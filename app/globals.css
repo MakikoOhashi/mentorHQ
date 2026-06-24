@@ -347,6 +347,74 @@ blockquote {
   border-color: #cfe4d8;
 }
 
+.daily-review-panel {
+  padding: 22px;
+  background:
+    radial-gradient(circle at top right, rgba(31, 119, 87, 0.09), transparent 32%),
+    linear-gradient(180deg, #ffffff, #fbfdfb);
+}
+
+.daily-review-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.review-status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid #cfe4d8;
+  background: #f4fbf7;
+  color: #1f7757;
+  font-size: 0.74rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.daily-review-content {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.daily-review-block {
+  display: grid;
+  gap: 8px;
+}
+
+.review-list {
+  display: grid;
+  gap: 8px;
+}
+
+.review-list p,
+.review-empty-state p {
+  margin: 0;
+}
+
+.review-list p {
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: #fffdfa;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.review-empty-state {
+  margin-top: 18px;
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px dashed var(--border);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--muted);
+}
+
 .discussion-heading {
   display: flex;
   align-items: flex-start;
@@ -721,6 +789,10 @@ blockquote {
   }
 
   .observation-stream-heading {
+    flex-direction: column;
+  }
+
+  .daily-review-heading {
     flex-direction: column;
   }
 }

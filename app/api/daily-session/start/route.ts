@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getLearnerCaseByQuestionId, getMockDailyPracticeQuestionIds } from "@/lib/deliberation/mock";
-import { createDailySession, getObservationEventsForDailySession } from "@/lib/deliberation/session-memory";
+import { createDailySession, getDailyReviewForSession, getObservationEventsForDailySession } from "@/lib/deliberation/session-memory";
 
 export const runtime = "nodejs";
 
@@ -22,6 +22,7 @@ export async function POST() {
   const currentQuestionId = session.question_ids[session.current_index] ?? null;
   const learnerCase = currentQuestionId ? getLearnerCaseByQuestionId(currentQuestionId) : null;
   const observations = await getObservationEventsForDailySession(session.id);
+  const dailyReview = await getDailyReviewForSession(session.id);
 
   return NextResponse.json({
     session,
@@ -29,6 +30,7 @@ export async function POST() {
     currentQuestionId,
     totalQuestions: session.question_ids.length,
     observations,
-    latestObservation: observations.at(-1) ?? null
+    latestObservation: observations.at(-1) ?? null,
+    dailyReview
   });
 }

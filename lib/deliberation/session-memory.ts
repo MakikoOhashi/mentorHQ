@@ -1,5 +1,7 @@
 import type {
   CoachDecision,
+  DailyReview,
+  DailyReviewInput,
   DailyReviewStatus,
   DailySession,
   DailySessionStatus,
@@ -10,6 +12,7 @@ import type {
   ObservationEventInput
 } from "@/lib/deliberation/types";
 import { detectMisunderstandingTypeFromDeliberation } from "@/lib/deliberation/observation";
+import { buildDailyReviewInput } from "@/lib/deliberation/review";
 import { applicationDefault, getApp, getApps, initializeApp } from "firebase-admin/app";
 import { FieldValue, getFirestore, type Firestore, type QueryDocumentSnapshot, type Timestamp } from "firebase-admin/firestore";
 import { readFile, writeFile } from "node:fs/promises";
@@ -58,14 +61,21 @@ export type AdvanceDailySessionInput = {
   observation?: ObservationEventInput;
 };
 
+export type GenerateDailyReviewInput = {
+  sessionId: string;
+};
+
 const SESSIONS_COLLECTION = "sessions";
 const DAILY_SESSIONS_COLLECTION = "daily_sessions";
 const OBSERVATION_EVENTS_COLLECTION = "observation_events";
+const DAILY_REVIEWS_COLLECTION = "daily_reviews";
 const RECENT_SESSION_LIMIT = 5;
 const inMemoryDailySessions = new Map<string, DailySession>();
 const inMemoryObservationEvents = new Map<string, ObservationEvent>();
+const inMemoryDailyReviews = new Map<string, DailyReview>();
 const DAILY_SESSIONS_FALLBACK_PATH = join("/tmp", "mentorhq-daily-sessions.json");
 const OBSERVATION_EVENTS_FALLBACK_PATH = join("/tmp", "mentorhq-observation-events.json");
+const DAILY_REVIEWS_FALLBACK_PATH = join("/tmp", "mentorhq-daily-reviews.json");
 
 function getInterventionLabel(intervention: DeliberationResponse["coach_decision"]["selected_intervention"]): string {
   switch (intervention) {
@@ -253,7 +263,7 @@ function toSerializableDailySession(snapshot: QueryDocumentSnapshot): DailySessi
     question_ids: data.question_ids.filter((value: unknown): value is string => typeof value === "string"),
     current_index: typeof data.current_index === "number" ? data.current_index : 0,
     observation_count: typeof data.observation_count === "number" ? data.observation_count : 0,
-    review_status: isDailyReviewStatus(data.review_status) ? data.review_status : "pending"
+    review_status: normalizeDailyReviewStatus(data.review_status)
   };
 }
 
@@ -284,12 +294,44 @@ function toSerializableObservationEvent(snapshot: QueryDocumentSnapshot): Observ
   };
 }
 
+function toSerializableDailyReview(snapshot: QueryDocumentSnapshot): DailyReview | null {
+  const data = snapshot.data();
+
+  if (
+    typeof data.daily_session_id !== "string" ||
+    typeof data.summary !== "string" ||
+    !Array.isArray(data.key_observations) ||
+    !Array.isArray(data.repeated_patterns) ||
+    typeof data.coach_comment !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    id: snapshot.id,
+    daily_session_id: data.daily_session_id,
+    summary: data.summary,
+    key_observations: data.key_observations.filter((value: unknown): value is string => typeof value === "string"),
+    repeated_patterns: data.repeated_patterns.filter((value: unknown): value is string => typeof value === "string"),
+    coach_comment: data.coach_comment,
+    created_at: toSerializableCreatedAt(data.created_at)
+  };
+}
+
 function isDailySessionStatus(value: unknown): value is DailySessionStatus {
   return value === "draft" || value === "active" || value === "completed";
 }
 
 function isDailyReviewStatus(value: unknown): value is DailyReviewStatus {
-  return value === "pending" || value === "ready";
+  return value === "pending" || value === "generated";
+}
+
+function normalizeDailyReviewStatus(value: unknown): DailyReviewStatus {
+  if (value === "ready") {
+    return "generated";
+  }
+
+  return isDailyReviewStatus(value) ? value : "pending";
 }
 
 function isSelectedIntervention(value: unknown): value is ObservationEvent["intervention_type"] {
@@ -395,6 +437,11 @@ function saveObservationEventToMemory(event: ObservationEvent): ObservationEvent
   return event;
 }
 
+function saveDailyReviewToMemory(review: DailyReview): DailyReview {
+  inMemoryDailyReviews.set(review.daily_session_id, review);
+  return review;
+}
+
 async function loadFallbackObservationEvents(): Promise<ObservationEvent[]> {
   try {
     const text = await readFile(OBSERVATION_EVENTS_FALLBACK_PATH, "utf8");
@@ -420,6 +467,33 @@ async function saveObservationEventToFallback(event: ObservationEvent): Promise<
   nextEvents.push(event);
   await persistFallbackObservationEvents(nextEvents);
   return event;
+}
+
+async function loadFallbackDailyReviews(): Promise<DailyReview[]> {
+  try {
+    const text = await readFile(DAILY_REVIEWS_FALLBACK_PATH, "utf8");
+    const reviews = JSON.parse(text) as DailyReview[];
+    if (!Array.isArray(reviews)) {
+      return [];
+    }
+
+    return reviews;
+  } catch {
+    return [];
+  }
+}
+
+async function persistFallbackDailyReviews(reviews: DailyReview[]): Promise<void> {
+  await writeFile(DAILY_REVIEWS_FALLBACK_PATH, JSON.stringify(reviews, null, 2), "utf8");
+}
+
+async function saveDailyReviewToFallback(review: DailyReview): Promise<DailyReview> {
+  saveDailyReviewToMemory(review);
+  const reviews = await loadFallbackDailyReviews();
+  const nextReviews = reviews.filter((item) => item.daily_session_id !== review.daily_session_id);
+  nextReviews.push(review);
+  await persistFallbackDailyReviews(nextReviews);
+  return review;
 }
 
 async function getObservationEventsFromFallback(dailySessionId: string): Promise<ObservationEvent[]> {
@@ -454,6 +528,17 @@ async function getLatestDailySessionFromFallback(): Promise<DailySession | null>
   });
 
   return sortedSessions[0] ?? null;
+}
+
+async function getDailyReviewFromFallback(dailySessionId: string): Promise<DailyReview | null> {
+  const fileReviews = await loadFallbackDailyReviews();
+  const memoryReviews = Array.from(inMemoryDailyReviews.values());
+  const reviews = [...fileReviews, ...memoryReviews].reduce<Map<string, DailyReview>>((map, review) => {
+    map.set(review.daily_session_id, review);
+    return map;
+  }, new Map());
+
+  return reviews.get(dailySessionId) ?? null;
 }
 
 function buildMemoryMessageHint(summary: Omit<MemorySummary, "memoryMessageHint">): string {
@@ -655,6 +740,112 @@ async function createObservationEvent(observation: ObservationEventInput): Promi
   }
 }
 
+async function createDailyReview(review: DailyReviewInput): Promise<DailyReview | null> {
+  const firestore = await getFirestoreClient();
+  const reviewId = crypto.randomUUID();
+  const fallbackReview: DailyReview = {
+    id: reviewId,
+    daily_session_id: review.daily_session_id,
+    summary: review.summary,
+    key_observations: review.key_observations,
+    repeated_patterns: review.repeated_patterns,
+    coach_comment: review.coach_comment,
+    created_at: new Date().toISOString()
+  };
+
+  if (!firestore) {
+    return saveDailyReviewToFallback(fallbackReview);
+  }
+
+  try {
+    const payload = removeUndefinedDeep({
+      daily_session_id: review.daily_session_id,
+      summary: review.summary,
+      key_observations: review.key_observations,
+      repeated_patterns: review.repeated_patterns,
+      coach_comment: review.coach_comment,
+      created_at: FieldValue.serverTimestamp()
+    });
+
+    await firestore.collection(DAILY_REVIEWS_COLLECTION).doc(reviewId).set(payload);
+    console.info("[firestore] daily review created");
+
+    return {
+      ...fallbackReview,
+      created_at: null
+    };
+  } catch (error) {
+    if (isMissingDefaultCredentialsError(error)) {
+      disableFirestoreRuntime();
+    }
+    console.warn("[firestore] create daily review skipped", getErrorDetails(error));
+    return saveDailyReviewToFallback(fallbackReview);
+  }
+}
+
+export async function getDailySessionById(sessionId: string): Promise<DailySession | null> {
+  const firestore = await getFirestoreClient();
+  if (!firestore) {
+    return (
+      inMemoryDailySessions.get(sessionId) ??
+      (await loadFallbackDailySessions()).find((session) => session.id === sessionId) ??
+      null
+    );
+  }
+
+  try {
+    const snapshot = await firestore.collection(DAILY_SESSIONS_COLLECTION).doc(sessionId).get();
+    if (!snapshot.exists) {
+      return null;
+    }
+
+    return toSerializableDailySession(snapshot as QueryDocumentSnapshot);
+  } catch (error) {
+    if (isMissingDefaultCredentialsError(error)) {
+      disableFirestoreRuntime();
+    }
+    console.warn("[firestore] daily session lookup skipped", getErrorDetails(error));
+    return (
+      inMemoryDailySessions.get(sessionId) ??
+      (await loadFallbackDailySessions()).find((session) => session.id === sessionId) ??
+      null
+    );
+  }
+}
+
+async function updateDailySessionReviewStatus(
+  session: DailySession,
+  reviewStatus: DailyReviewStatus
+): Promise<DailySession> {
+  const nextSession: DailySession = {
+    ...session,
+    review_status: reviewStatus
+  };
+  const firestore = await getFirestoreClient();
+
+  if (!firestore) {
+    return saveDailySessionToFallback(nextSession);
+  }
+
+  try {
+    await firestore.collection(DAILY_SESSIONS_COLLECTION).doc(session.id).set(
+      removeUndefinedDeep({
+        review_status: reviewStatus
+      }),
+      { merge: true }
+    );
+
+    saveDailySessionToMemory(nextSession);
+    return nextSession;
+  } catch (error) {
+    if (isMissingDefaultCredentialsError(error)) {
+      disableFirestoreRuntime();
+    }
+    console.warn("[firestore] daily session review status update skipped", getErrorDetails(error));
+    return saveDailySessionToFallback(nextSession);
+  }
+}
+
 export async function advanceDailySession({ sessionId, observation }: AdvanceDailySessionInput): Promise<DailySession | null> {
   const firestore = await getFirestoreClient();
   if (!firestore) {
@@ -740,6 +931,78 @@ export async function advanceDailySession({ sessionId, observation }: AdvanceDai
       status: nextStatus
     });
   }
+}
+
+export async function getDailyReviewForSession(dailySessionId: string): Promise<DailyReview | null> {
+  const firestore = await getFirestoreClient();
+  if (!firestore) {
+    return getDailyReviewFromFallback(dailySessionId);
+  }
+
+  try {
+    const snapshot = await firestore
+      .collection(DAILY_REVIEWS_COLLECTION)
+      .where("daily_session_id", "==", dailySessionId)
+      .limit(1)
+      .get();
+
+    if (snapshot.empty) {
+      return null;
+    }
+
+    return toSerializableDailyReview(snapshot.docs[0]);
+  } catch (error) {
+    if (isMissingDefaultCredentialsError(error)) {
+      disableFirestoreRuntime();
+    }
+    console.warn("[firestore] daily review lookup skipped", getErrorDetails(error));
+    return getDailyReviewFromFallback(dailySessionId);
+  }
+}
+
+export async function generateDailyReviewForSession({
+  sessionId
+}: GenerateDailyReviewInput): Promise<{ session: DailySession; review: DailyReview } | null> {
+  const session = await getDailySessionById(sessionId);
+  if (!session || session.status !== "completed") {
+    return null;
+  }
+
+  const existingReview = await getDailyReviewForSession(sessionId);
+  if (existingReview) {
+    const updatedSession =
+      session.review_status === "generated"
+        ? session
+        : await updateDailySessionReviewStatus(session, "generated");
+
+    return {
+      session: updatedSession,
+      review: existingReview
+    };
+  }
+
+  const observations = await getObservationEventsForDailySession(sessionId);
+  if (observations.length === 0) {
+    return null;
+  }
+
+  const memorySummary = await getLatestMemorySummary();
+  const reviewInput = buildDailyReviewInput({
+    dailySessionId: sessionId,
+    observations,
+    memorySummary
+  });
+  const review = await createDailyReview(reviewInput);
+  if (!review) {
+    return null;
+  }
+
+  const updatedSession = await updateDailySessionReviewStatus(session, "generated");
+
+  return {
+    session: updatedSession,
+    review
+  };
 }
 
 export async function getObservationEventsForDailySession(dailySessionId: string): Promise<ObservationEvent[]> {

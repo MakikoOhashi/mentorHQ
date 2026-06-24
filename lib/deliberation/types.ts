@@ -76,7 +76,7 @@ export const DAILY_SESSION_STATUSES = ["draft", "active", "completed"] as const;
 
 export type DailySessionStatus = (typeof DAILY_SESSION_STATUSES)[number];
 
-export const DAILY_REVIEW_STATUSES = ["pending", "ready"] as const;
+export const DAILY_REVIEW_STATUSES = ["pending", "generated"] as const;
 
 export type DailyReviewStatus = (typeof DAILY_REVIEW_STATUSES)[number];
 
@@ -118,4 +118,22 @@ export type ObservationEventInput = {
   misunderstanding_type: ObservationMisunderstandingType;
   confidence: number | null;
   note: string;
+};
+
+export type DailyReview = {
+  id: string;
+  daily_session_id: string;
+  summary: string;
+  key_observations: string[];
+  repeated_patterns: string[];
+  coach_comment: string;
+  created_at: string | null;
+};
+
+export type DailyReviewInput = {
+  daily_session_id: string;
+  summary: string;
+  key_observations: string[];
+  repeated_patterns: string[];
+  coach_comment: string;
 };
