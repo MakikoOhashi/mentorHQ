@@ -428,30 +428,10 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const questionCtaLabel = isFinalActiveQuestion ? "Submit and open Daily Review" : "Submit and go next";
 
   return (
-    <main className="page-shell learner-shell">
-      <section className="hero learner-hero">
-        <div>
-          <p className="eyebrow">MentorHQ MVP Demo</p>
-          <h1>Learner Flow / Coach Mind</h1>
-          <p className="body-copy hero-support-copy">
-            左は学習者の1画面ずつの進行、右はAIコーチの観察ログです。
-          </p>
-        </div>
-        <div className="hero-meta">
-          <span>{learnerCase.exam}</span>
-          <span>{learnerCase.theme}</span>
-          <span>{mode === "ai" ? "AI Deliberation" : "Mock Fallback"}</span>
-        </div>
-      </section>
-
-      <section className="learner-layout">
-        <div className="learner-column">
-          <div className="column-header">
-            <p className="eyebrow">Learner View</p>
-            <h2>今日の学習画面</h2>
-          </div>
-
-          <article className="phone-frame">
+    <main className="demo-viewport">
+      <section className="device-layout">
+        <article className="phone-frame">
+          <div className="device-scroll-shell">
             <div className="phone-chrome">
               <div>
                 <p className="phone-app-label">Learner App</p>
@@ -692,20 +672,16 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
               <span>{completedQuestionCount} completed</span>
               <span>{dailySession?.observation_count ?? 0} observations</span>
             </div>
-          </article>
-        </div>
-
-        <div className="coach-column">
-          <div className="column-header">
-            <p className="eyebrow">AI Coach Mind</p>
-            <h2>Observation Stream</h2>
           </div>
+        </article>
 
-          <article className="panel observation-stream-panel sticky-panel">
+        <article className="tablet-frame">
+          <div className="device-scroll-shell coach-scroll-shell">
             <div className="panel-heading tight observation-stream-heading">
               <div>
                 <span className="panel-kicker">AI Coach Mind</span>
                 <h3>まだ判断せず、観察だけを積みます</h3>
+                <p className="device-caption">{learnerCase.exam} / {mode === "ai" ? "AI Deliberation" : "Mock Fallback"}</p>
               </div>
               <span className="observation-count-pill">
                 {dailySession ? `${dailySession.observation_count} observations` : "0 observations"}
@@ -761,8 +737,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                 )}
               </div>
             </div>
-          </article>
-        </div>
+          </div>
+        </article>
       </section>
     </main>
   );
