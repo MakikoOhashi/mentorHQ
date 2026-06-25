@@ -29,32 +29,34 @@ type DailySessionPayload = {
   tomorrowPlan: TomorrowPlan | null;
 };
 
-function getObservationIcon(observation: ObservationEvent) {
-  if (observation.intervention_type === "starting_point_check") return "🧠";
-  if (observation.intervention_type === "contrast_check") return "🔁";
-  if (observation.intervention_type === "integrated_retry") return "⚖️";
-  return "📝";
-}
+type LearnerStep =
+  | "morning"
+  | "question-1"
+  | "question-2"
+  | "question-3"
+  | "review"
+  | "tomorrow"
+  | "goodbye";
 
-function getSessionExperienceStatus(session: DailySession | null): "active" | "completed" | "reviewed" | "planned" {
-  if (!session) {
-    return "active";
-  }
+const STEP_ORDER: LearnerStep[] = [
+  "morning",
+  "question-1",
+  "question-2",
+  "question-3",
+  "review",
+  "tomorrow",
+  "goodbye"
+];
 
-  if (session.tomorrow_plan_status === "generated") {
-    return "planned";
-  }
-
-  if (session.review_status === "generated") {
-    return "reviewed";
-  }
-
-  if (session.status === "completed") {
-    return "completed";
-  }
-
-  return "active";
-}
+const STEP_LABELS: Record<LearnerStep, string> = {
+  morning: "Morning Brief",
+  "question-1": "Question 1",
+  "question-2": "Question 2",
+  "question-3": "Question 3",
+  review: "Daily Coach Review",
+  tomorrow: "Tomorrow Plan",
+  goodbye: "Goodbye"
+};
 
 const EVENT_DURATIONS: Record<DeliberationEvent["type"], number> = {
   observation: 1500,
@@ -64,6 +66,13 @@ const EVENT_DURATIONS: Record<DeliberationEvent["type"], number> = {
   coach_decision: 3000
 };
 
+function getObservationIcon(observation: ObservationEvent) {
+  if (observation.intervention_type === "starting_point_check") return "🧠";
+  if (observation.intervention_type === "contrast_check") return "🔁";
+  if (observation.intervention_type === "integrated_retry") return "💭";
+  return "📌";
+}
+
 function getCumulativeEventDelay(events: DeliberationEvent[], index: number) {
   let total = 350;
 
@@ -72,6 +81,44 @@ function getCumulativeEventDelay(events: DeliberationEvent[], index: number) {
   }
 
   return total;
+}
+
+function getCurrentStep(session: DailySession | null, tomorrowPlan: TomorrowPlan | null): LearnerStep {
+  if (!session) {
+    return "morning";
+  }
+
+  if (tomorrowPlan || session.tomorrow_plan_status === "generated") {
+    return "goodbye";
+  }
+
+  if (session.review_status === "generated") {
+    return "tomorrow";
+  }
+
+  if (session.status === "completed") {
+    return "review";
+  }
+
+  const questionStep = session.current_index + 1;
+  if (questionStep <= 1) return "question-1";
+  if (questionStep === 2) return "question-2";
+  return "question-3";
+}
+
+function formatObservationTime(createdAt: string | null, index: number) {
+  if (createdAt) {
+    const date = new Date(createdAt);
+    if (!Number.isNaN(date.getTime())) {
+      return new Intl.DateTimeFormat("ja-JP", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false
+      }).format(date);
+    }
+  }
+
+  return `09:${String(index * 2 + 1).padStart(2, "0")}`;
 }
 
 export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
@@ -89,6 +136,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const [sessionActionStatus, setSessionActionStatus] = useState<"idle" | "starting" | "advancing">("idle");
   const [reviewActionStatus, setReviewActionStatus] = useState<"idle" | "generating">("idle");
   const [planActionStatus, setPlanActionStatus] = useState<"idle" | "generating">("idle");
+  const [learnerStepOverride, setLearnerStepOverride] = useState<LearnerStep | null>(null);
   const [mode, setMode] = useState<"mock" | "ai">("mock");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const timeoutIdsRef = useRef<number[]>([]);
@@ -120,6 +168,13 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
 
       const payload = (await response.json()) as DeliberationResponse;
       setMode(payload.mode);
+
+      if (payload.deliberation_events.length === 0) {
+        setDecision(payload.coach_decision);
+        setStatus("done");
+        return;
+      }
+
       setStatus("streaming");
 
       payload.deliberation_events.forEach((event, index) => {
@@ -157,7 +212,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       setSessionStatusMessage(
         payload.session.status === "completed"
           ? "今日の3問セッションは完了しました。"
-          : `今日の固定3問セッションを進行中です。`
+          : "今日の固定3問セッションを進行中です。"
       );
 
       if (payload.learnerCase) {
@@ -201,7 +256,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
           tomorrowPlan: payload.tomorrowPlan ?? null
         });
       } catch {
-        // latest session hydrate is best-effort for demo continuity
+        // hydrate latest session only when available
       }
     }
 
@@ -226,6 +281,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       }
 
       const payload = (await response.json()) as DailySessionPayload;
+      setLearnerStepOverride(null);
       applyDailySessionPayload(payload);
 
       if (payload.learnerCase) {
@@ -272,6 +328,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       }
 
       const payload = (await response.json()) as DailySessionPayload;
+      setLearnerStepOverride(null);
       applyDailySessionPayload(payload);
 
       if (payload.session.status !== "completed" && payload.learnerCase) {
@@ -311,6 +368,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
 
       const payload = (await response.json()) as DailySessionPayload;
       applyDailySessionPayload(payload);
+      setLearnerStepOverride("review");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Unknown error");
     } finally {
@@ -345,6 +403,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
 
       const payload = (await response.json()) as DailySessionPayload;
       applyDailySessionPayload(payload);
+      setLearnerStepOverride("tomorrow");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Unknown error");
     } finally {
@@ -352,206 +411,308 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     }
   }, [applyDailySessionPayload, dailySession]);
 
+  const derivedStep = getCurrentStep(dailySession, tomorrowPlan);
+  const currentStep = learnerStepOverride ?? derivedStep;
+  const currentStepIndex = STEP_ORDER.indexOf(currentStep);
+  const activeQuestionNumber =
+    dailySession && dailySession.status !== "completed" ? dailySession.current_index + 1 : null;
+  const totalQuestions = dailySession?.question_ids.length ?? 3;
   const completedQuestionCount = dailySession
     ? Math.min(dailySession.current_index, dailySession.question_ids.length)
     : 0;
-  const activeQuestionNumber =
-    dailySession && dailySession.status !== "completed" ? dailySession.current_index + 1 : null;
   const canAdvance = dailySession !== null && dailySession.status !== "completed" && status === "done";
   const isFinalActiveQuestion =
     dailySession !== null &&
     dailySession.status !== "completed" &&
     dailySession.current_index === dailySession.question_ids.length - 1;
-  const experienceStatus = getSessionExperienceStatus(dailySession);
-  const currentQuestionStep = dailySession && dailySession.status !== "completed" ? dailySession.current_index + 2 : 4;
-  const flowSteps = [
-    { label: "Morning Brief", detail: "今日は3問だけ解きます。", state: "done" },
-    { label: "Question 1", detail: "最初の迷い方を見る", state: currentQuestionStep > 2 ? "done" : currentQuestionStep === 2 ? "current" : "upcoming" },
-    { label: "Question 2", detail: "比較して傾向を見る", state: currentQuestionStep > 3 ? "done" : currentQuestionStep === 3 ? "current" : "upcoming" },
-    { label: "Question 3", detail: "最後の観察を残す", state: currentQuestionStep > 4 ? "done" : currentQuestionStep === 4 ? "current" : "upcoming" },
-    { label: "Daily Coach Review", detail: "今日の傾向を整理", state: dailySession?.review_status === "generated" ? "done" : dailySession?.status === "completed" ? "current" : "upcoming" },
-    { label: "Tomorrow Plan", detail: "明日の練習を組み直す", state: dailySession?.tomorrow_plan_status === "generated" ? "done" : dailySession?.review_status === "generated" ? "current" : "upcoming" },
-    { label: "Goodbye", detail: "明日の重点を持ち帰る", state: dailySession?.tomorrow_plan_status === "generated" ? "current" : "upcoming" }
-  ] as const;
+  const questionCtaLabel = isFinalActiveQuestion ? "Submit and open Daily Review" : "Submit and go next";
 
   return (
-    <main className="page-shell">
-      <section className="hero">
+    <main className="page-shell learner-shell">
+      <section className="hero learner-hero">
         <div>
           <p className="eyebrow">MentorHQ MVP Demo</p>
-          <h1>Daily Coaching Session</h1>
+          <h1>Learner Flow / Coach Mind</h1>
+          <p className="body-copy hero-support-copy">
+            左は学習者の1画面ずつの進行、右はAIコーチの観察ログです。
+          </p>
         </div>
         <div className="hero-meta">
           <span>{learnerCase.exam}</span>
           <span>{learnerCase.theme}</span>
           <span>{mode === "ai" ? "AI Deliberation" : "Mock Fallback"}</span>
-          <span>{experienceStatus}</span>
         </div>
       </section>
 
-      <section className="session-flow-grid">
-        <article className="panel morning-brief-panel">
-          <div className="panel-heading tight">
-            <span className="panel-kicker">Morning Brief</span>
-            <h2>おはようございます。</h2>
-          </div>
-          <p className="body-copy">
-            今日は3問だけ解きます。AIは答えを急がず、学習中の迷い方を観察します。
-          </p>
-          <p className="brief-support-copy">
-            AI is observing patterns, not making a decision yet.
-          </p>
-        </article>
-
-        <article className="panel flow-panel">
-          <div className="panel-heading tight">
-            <span className="panel-kicker">Session Flow</span>
-            <h2>Morning Brief → Review → Tomorrow Plan</h2>
-          </div>
-          <div className="flow-step-list">
-            {flowSteps.map((step, index) => (
-              <section className={`flow-step flow-step-${step.state}`} key={step.label}>
-                <div className="flow-step-index">{index + 1}</div>
-                <div className="flow-step-copy">
-                  <p className="flow-step-label">{step.label}</p>
-                  <p className="flow-step-detail">{step.detail}</p>
-                </div>
-              </section>
-            ))}
-          </div>
-        </article>
-      </section>
-
-      <section className="workspace-grid">
-        <div className="column">
+      <section className="learner-layout">
+        <div className="learner-column">
           <div className="column-header">
-            <p className="eyebrow">ケース概要</p>
-            <h2>学習者の状況</h2>
+            <p className="eyebrow">Learner View</p>
+            <h2>今日の学習画面</h2>
           </div>
 
-          <article className="panel compact problem-panel">
-            <div className="panel-heading tight">
-              <span className="panel-kicker">問題</span>
-              <h3>{learnerCase.questionTitle}</h3>
+          <article className="phone-frame">
+            <div className="phone-chrome">
+              <div>
+                <p className="phone-app-label">Learner App</p>
+                <p className="phone-app-name">MentorHQ Student</p>
+              </div>
+              <div className="phone-status">
+                <span>{STEP_LABELS[currentStep]}</span>
+              </div>
             </div>
-            <p className="body-copy compact-copy">{learnerCase.questionStem}</p>
-            <p className="leg-statement">{learnerCase.currentLeg}</p>
-          </article>
 
-          <article className="panel compact answer-panel">
-            <div className="panel-heading tight">
-              <span className="panel-kicker">Daily Session</span>
-              <h3>固定3問セッション</h3>
+            <div className="phone-progress">
+              {STEP_ORDER.map((step, index) => (
+                <div
+                  className={`phone-progress-dot ${
+                    index < currentStepIndex ? "is-complete" : index === currentStepIndex ? "is-current" : ""
+                  }`}
+                  key={step}
+                />
+              ))}
             </div>
-            <div className="compact-stack">
-              <div>
-                <span className="summary-label">セッション状態</span>
-                <p className="value-text session-status-text">
-                  {dailySession ? dailySession.status : "not_started"}
-                </p>
-              </div>
-              <div>
-                <span className="summary-label">進行状況</span>
-                <div className="reflection-box">
-                  {dailySession
-                    ? `${completedQuestionCount} / ${dailySession.question_ids.length} 問完了${
-                        activeQuestionNumber ? `・現在 ${activeQuestionNumber} 問目` : ""
-                      }`
-                    : "Start Daily Session で今日の3問を開始します。"}
-                </div>
-              </div>
-              <div>
-                <span className="summary-label">表示</span>
-                <div className="reflection-box">{sessionStatusMessage}</div>
-              </div>
-              <div>
-                <span className="summary-label">Session Flow</span>
-                <div className="reflection-box">
-                  {experienceStatus === "active"
-                    ? "3問学習を進めています。"
-                    : experienceStatus === "completed"
-                      ? "3問が終わり、次は Daily Coach Review です。"
-                      : experienceStatus === "reviewed"
-                        ? "今日の傾向を整理しました。次は Tomorrow Plan です。"
-                        : "Tomorrow Plan まで完了しました。"}
-                </div>
-              </div>
-              <div>
-                <span className="summary-label">Review Status</span>
-                <div className="reflection-box">
-                  {dailySession ? dailySession.review_status : "pending"}
-                </div>
-              </div>
-              <div>
-                <span className="summary-label">Tomorrow Plan Status</span>
-                <div className="reflection-box">
-                  {dailySession ? dailySession.tomorrow_plan_status : "pending"}
-                </div>
-              </div>
-            </div>
-            <button
-              className="primary-button"
-              onClick={() => void startDailySession()}
-              type="button"
-              disabled={sessionActionStatus !== "idle" || Boolean(dailySession && dailySession.status !== "completed")}
-            >
-              {sessionActionStatus === "starting" ? "Starting..." : "Start Daily Session"}
-            </button>
-          </article>
 
-          <article className="panel compact answer-panel">
-            <div className="compact-stack">
-              <div>
-                <span className="summary-label">学習者の回答</span>
-                <p className="value-text">{learnerCase.learnerAnswer}</p>
-              </div>
-              <div>
-                <span className="summary-label">理由</span>
-                <div className="reflection-box">{learnerCase.reason}</div>
-              </div>
-              <div>
-                <span className="summary-label">客観的真偽</span>
-                <div className="reflection-box">{learnerCase.objectiveTruth}</div>
-              </div>
-            </div>
-          </article>
+            <div className="phone-card">
+              {currentStep === "morning" ? (
+                <>
+                  <div className="panel-heading tight">
+                    <span className="panel-kicker">Morning Brief</span>
+                    <h3>今日の学習開始</h3>
+                  </div>
+                  <p className="body-copy">
+                    今日は3問だけ進めます。AIコーチは答えを急がず、迷い方や見落とし方を静かに観察します。
+                  </p>
+                  <div className="reflection-box">
+                    Start Daily Session を押すと Question 1 に進みます。
+                  </div>
+                  <button
+                    className="primary-button phone-button"
+                    onClick={() => void startDailySession()}
+                    type="button"
+                    disabled={sessionActionStatus !== "idle"}
+                  >
+                    {sessionActionStatus === "starting" ? "Starting..." : "Start Daily Session"}
+                  </button>
+                </>
+              ) : null}
 
-          <article className="panel compact answer-panel">
-            <div className="panel-heading tight">
-              <span className="panel-kicker">Run Control</span>
-              <h3>Observation を更新</h3>
+              {currentStep.startsWith("question-") ? (
+                <>
+                  <div className="panel-heading tight">
+                    <span className="panel-kicker">{STEP_LABELS[currentStep]}</span>
+                    <h3>{learnerCase.questionTitle}</h3>
+                  </div>
+                  <div className="question-meta-strip">
+                    <span>{activeQuestionNumber} / {totalQuestions}</span>
+                    <span>{sessionStatusMessage}</span>
+                  </div>
+                  <p className="body-copy">{learnerCase.questionStem}</p>
+                  <div className="prompt-card">
+                    <span className="summary-label">Current Focus</span>
+                    <p>{learnerCase.currentLeg}</p>
+                  </div>
+                  <div className="phone-answer-block">
+                    <span className="summary-label">Learner Answer</span>
+                    <div className="reflection-box">{learnerCase.learnerAnswer}</div>
+                  </div>
+                  <div className="phone-answer-block">
+                    <span className="summary-label">Why they chose it</span>
+                    <div className="reflection-box">{learnerCase.reason}</div>
+                  </div>
+                  <div className="phone-answer-block">
+                    <span className="summary-label">Ground Truth</span>
+                    <div className="reflection-box">{learnerCase.objectiveTruth}</div>
+                  </div>
+                  <div className="quiet-status-box">
+                    {status === "loading" || status === "streaming"
+                      ? "AI coach is observing this answer in the background..."
+                      : "観察の下書きができました。次へ進めます。"}
+                  </div>
+                  <button
+                    className="primary-button phone-button"
+                    onClick={() => void advanceToNextQuestion()}
+                    type="button"
+                    disabled={!canAdvance || sessionActionStatus !== "idle"}
+                  >
+                    {sessionActionStatus === "advancing" ? "Submitting..." : questionCtaLabel}
+                  </button>
+                </>
+              ) : null}
+
+              {currentStep === "review" ? (
+                <>
+                  <div className="panel-heading tight">
+                    <span className="panel-kicker">Daily Coach Review</span>
+                    <h3>今日の振り返り</h3>
+                  </div>
+                  {dailyReview ? (
+                    <div className="daily-review-content">
+                      <section className="daily-review-block">
+                        <span className="summary-label">Summary</span>
+                        <div className="reflection-box">{dailyReview.summary}</div>
+                      </section>
+                      <section className="daily-review-block">
+                        <span className="summary-label">Key Observations</span>
+                        <div className="review-list">
+                          {dailyReview.key_observations.map((item) => (
+                            <p key={item}>{item}</p>
+                          ))}
+                        </div>
+                      </section>
+                      <section className="daily-review-block">
+                        <span className="summary-label">Tomorrow Candidates</span>
+                        <div className="review-list">
+                          {dailyReview.repeated_patterns.map((item) => (
+                            <p key={item}>{item}</p>
+                          ))}
+                        </div>
+                      </section>
+                      <section className="daily-review-block">
+                        <span className="summary-label">Coach Comment</span>
+                        <div className="reflection-box">{dailyReview.coach_comment}</div>
+                      </section>
+                    </div>
+                  ) : (
+                    <div className="review-empty-state">
+                      <p>3問分の観察が集まりました。</p>
+                      <p>ここで初めて、今日の傾向を短く整理します。</p>
+                    </div>
+                  )}
+                  {dailyReview ? (
+                    <button
+                      className="primary-button phone-button"
+                      onClick={() => setLearnerStepOverride(null)}
+                      type="button"
+                    >
+                      Next: Tomorrow Plan
+                    </button>
+                  ) : (
+                    <button
+                      className="primary-button phone-button"
+                      onClick={() => void generateDailyReview()}
+                      type="button"
+                      disabled={reviewActionStatus !== "idle"}
+                    >
+                      {reviewActionStatus === "generating" ? "Generating..." : "Generate Daily Review"}
+                    </button>
+                  )}
+                </>
+              ) : null}
+
+              {currentStep === "tomorrow" ? (
+                <>
+                  <div className="panel-heading tight">
+                    <span className="panel-kicker">Tomorrow Plan</span>
+                    <h3>明日の進め方</h3>
+                  </div>
+                  {tomorrowPlan ? (
+                    <div className="daily-review-content">
+                      <section className="daily-review-block">
+                        <span className="summary-label">Focus Theme</span>
+                        <div className="reflection-box">{tomorrowPlan.focus_theme}</div>
+                      </section>
+                      <section className="daily-review-block">
+                        <span className="summary-label">Practice Items</span>
+                        <div className="review-list">
+                          {tomorrowPlan.practice_items.map((item) => (
+                            <p key={item}>{item}</p>
+                          ))}
+                        </div>
+                      </section>
+                      <section className="daily-review-block">
+                        <span className="summary-label">Caution Points</span>
+                        <div className="review-list">
+                          {tomorrowPlan.caution_points.map((item) => (
+                            <p key={item}>{item}</p>
+                          ))}
+                        </div>
+                      </section>
+                      <section className="daily-review-block">
+                        <span className="summary-label">Coach Message</span>
+                        <div className="reflection-box">{tomorrowPlan.coach_message}</div>
+                      </section>
+                    </div>
+                  ) : (
+                    <div className="review-empty-state">
+                      <p>Daily Review をもとに、明日の重点候補を組み立てます。</p>
+                      <p>まだ最終評価ではなく、次回の見方を残します。</p>
+                    </div>
+                  )}
+                  {tomorrowPlan ? (
+                    <button
+                      className="primary-button phone-button"
+                      onClick={() => setLearnerStepOverride(null)}
+                      type="button"
+                    >
+                      Finish
+                    </button>
+                  ) : (
+                    <button
+                      className="primary-button phone-button"
+                      onClick={() => void generateTomorrowPlan()}
+                      type="button"
+                      disabled={planActionStatus !== "idle" || dailySession?.review_status !== "generated"}
+                    >
+                      {planActionStatus === "generating" ? "Generating..." : "Generate Tomorrow Plan"}
+                    </button>
+                  )}
+                </>
+              ) : null}
+
+              {currentStep === "goodbye" ? (
+                <>
+                  <div className="panel-heading tight">
+                    <span className="panel-kicker">Goodbye</span>
+                    <h3>今日の学習完了</h3>
+                  </div>
+                  <div className="reflection-box">
+                    {tomorrowPlan
+                      ? `明日は ${tomorrowPlan.focus_theme} を重点的に確認します。`
+                      : "明日の重点をこのまま持ち帰ります。"}
+                  </div>
+                  <p className="body-copy">
+                    Observation Stream はこのまま残るので、今日の迷い方をあとから見返せます。
+                  </p>
+                  <button
+                    className="primary-button phone-button"
+                    onClick={() => void startDailySession()}
+                    type="button"
+                    disabled={sessionActionStatus !== "idle"}
+                  >
+                    {sessionActionStatus === "starting" ? "Starting..." : "Start New Session"}
+                  </button>
+                </>
+              ) : null}
+
+              {errorMessage ? <p className="error-text">{errorMessage}</p> : null}
             </div>
-            <p className="body-copy compact-copy">裏側の deliberation を再実行して、観察の下地を更新します。</p>
-            <button
-              className="primary-button"
-              onClick={() => void runDeliberation()}
-              type="button"
-              disabled={!dailySession || dailySession.status === "completed" || status === "loading" || status === "streaming"}
-            >
-              {status === "loading" || status === "streaming" ? "Running..." : "Run Deliberation"}
-            </button>
-            {errorMessage ? <p className="error-text">{errorMessage}</p> : null}
+
+            <div className="phone-footer">
+              <span>{completedQuestionCount} completed</span>
+              <span>{dailySession?.observation_count ?? 0} observations</span>
+            </div>
           </article>
         </div>
 
-        <div className="column">
+        <div className="coach-column">
           <div className="column-header">
-            <p className="eyebrow">Observation Stream</p>
-            <h2>AIが裏側で記録した観察</h2>
+            <p className="eyebrow">AI Coach Mind</p>
+            <h2>Observation Stream</h2>
           </div>
 
-          <article className="panel observation-stream-panel">
+          <article className="panel observation-stream-panel sticky-panel">
             <div className="panel-heading tight observation-stream-heading">
               <div>
-                <span className="panel-kicker">Observation Stream</span>
-                <h3>まだ判断せず、傾向だけを残します</h3>
+                <span className="panel-kicker">AI Coach Mind</span>
+                <h3>まだ判断せず、観察だけを積みます</h3>
               </div>
               <span className="observation-count-pill">
                 {dailySession ? `${dailySession.observation_count} observations` : "0 observations"}
               </span>
             </div>
             <p className="observation-intro-copy">
-              AI is observing patterns, not making a decision yet.
+              起算点や条件句、迷い方の癖をメモしています。結論は Review まで持ち込みません。
             </p>
 
             {latestObservation ? (
@@ -563,9 +724,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                   </span>
                   <div>
                     <p className="latest-observation-note">{latestObservation.note}</p>
-                    <p className="latest-observation-meta">
-                      可能性だけを残し、まだ判断しません。
-                    </p>
+                    <p className="latest-observation-meta">まだ判断せず、今日のレビューで確認します。</p>
                   </div>
                 </div>
               </section>
@@ -576,27 +735,25 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                 {observations.length === 0 ? (
                   <div className="observation-empty-state">
                     <p>まだ観察はありません。</p>
-                    <p>回答が進むと、AIが裏側で学習傾向を記録します。</p>
+                    <p>Question 1 から順に、右側へ静かに増えていきます。</p>
                   </div>
                 ) : (
-                  observations.map((observation) => (
+                  observations.map((observation, index) => (
                     <section
-                      className={`observation-row ${latestObservation?.id === observation.id ? "is-latest-observation" : ""}`}
+                      className={`mind-entry ${latestObservation?.id === observation.id ? "is-latest-observation" : ""}`}
                       key={observation.id}
                     >
-                      <div className="observation-icon" aria-hidden="true">
-                        {getObservationIcon(observation)}
-                      </div>
-                      <div className="observation-bubble">
-                        <p>{observation.note}</p>
-                        <div className="observation-meta-row">
-                          <span>{observation.intervention_type}</span>
-                          <span>{observation.misunderstanding_type}</span>
-                          <span>
-                            {observation.confidence !== null
-                              ? `${Math.round(observation.confidence * 100)}% confidence`
-                              : "confidence pending"}
-                          </span>
+                      <div className="mind-entry-time">{formatObservationTime(observation.created_at, index)}</div>
+                      <div className="observation-row">
+                        <div className="observation-icon" aria-hidden="true">
+                          {getObservationIcon(observation)}
+                        </div>
+                        <div className="observation-bubble">
+                          <p>{observation.note}</p>
+                          <div className="observation-meta-row">
+                            <span>{observation.intervention_type}</span>
+                            <span>{observation.misunderstanding_type}</span>
+                          </div>
                         </div>
                       </div>
                     </section>
@@ -604,165 +761,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                 )}
               </div>
             </div>
-            <button
-              className="primary-button secondary-button"
-              onClick={() => void advanceToNextQuestion()}
-              type="button"
-              disabled={!canAdvance || sessionActionStatus !== "idle"}
-            >
-              {sessionActionStatus === "advancing"
-                ? "Advancing..."
-                : isFinalActiveQuestion
-                  ? "この回答を記録して完了"
-                  : "この回答を記録して次へ"}
-            </button>
           </article>
-
-          {dailySession?.status === "completed" ? (
-            <>
-              <article className="panel daily-review-panel">
-                <div className="panel-heading tight daily-review-heading">
-                  <div>
-                    <span className="panel-kicker">Daily Coach Review</span>
-                    <h3>今日の観測まとめ</h3>
-                  </div>
-                  <span className="review-status-pill">
-                    {dailySession.review_status === "generated" ? "generated" : "pending"}
-                  </span>
-                </div>
-
-                {dailyReview ? (
-                  <div className="daily-review-content">
-                    <section className="daily-review-block">
-                      <span className="summary-label">今日の観測まとめ</span>
-                      <div className="reflection-box">{dailyReview.summary}</div>
-                    </section>
-
-                    <section className="daily-review-block">
-                      <span className="summary-label">観測メモ</span>
-                      <div className="review-list">
-                        {dailyReview.key_observations.map((item) => (
-                          <p key={item}>{item}</p>
-                        ))}
-                      </div>
-                    </section>
-
-                    <section className="daily-review-block">
-                      <span className="summary-label">明日の重点候補</span>
-                      <div className="review-list">
-                        {dailyReview.repeated_patterns.map((item) => (
-                          <p key={item}>{item}</p>
-                        ))}
-                      </div>
-                    </section>
-
-                    <section className="daily-review-block">
-                      <span className="summary-label">コーチコメント</span>
-                      <div className="reflection-box">{dailyReview.coach_comment}</div>
-                    </section>
-                  </div>
-                ) : (
-                  <div className="review-empty-state">
-                    <p>3問完了後に、その日の観測をまとめます。</p>
-                    <p>まだ最終判断ではなく、今日の振り返りだけを残します。</p>
-                    <p>3問が終わったら、ここから自然に次へ進みます。</p>
-                  </div>
-                )}
-
-                <button
-                  className="primary-button"
-                  onClick={() => void generateDailyReview()}
-                  type="button"
-                  disabled={reviewActionStatus !== "idle" || dailySession.review_status === "generated"}
-                >
-                  {reviewActionStatus === "generating"
-                    ? "Generating..."
-                    : dailySession.review_status === "generated"
-                      ? "Daily Review Generated"
-                      : "Generate Daily Review"}
-                </button>
-              </article>
-
-              <article className="panel tomorrow-plan-panel">
-                <div className="panel-heading tight daily-review-heading">
-                  <div>
-                    <span className="panel-kicker">Tomorrow Plan</span>
-                    <h3>明日の練習方針</h3>
-                  </div>
-                  <span className="review-status-pill">
-                    {dailySession.tomorrow_plan_status === "generated" ? "generated" : "pending"}
-                  </span>
-                </div>
-
-                {tomorrowPlan ? (
-                  <div className="daily-review-content">
-                    <section className="daily-review-block">
-                      <span className="summary-label">Focus Theme</span>
-                      <div className="reflection-box">{tomorrowPlan.focus_theme}</div>
-                    </section>
-
-                    <section className="daily-review-block">
-                      <span className="summary-label">Practice Items</span>
-                      <div className="review-list">
-                        {tomorrowPlan.practice_items.map((item) => (
-                          <p key={item}>{item}</p>
-                        ))}
-                      </div>
-                    </section>
-
-                    <section className="daily-review-block">
-                      <span className="summary-label">Caution Points</span>
-                      <div className="review-list">
-                        {tomorrowPlan.caution_points.map((item) => (
-                          <p key={item}>{item}</p>
-                        ))}
-                      </div>
-                    </section>
-
-                    <section className="daily-review-block">
-                      <span className="summary-label">Coach Message</span>
-                      <div className="reflection-box">{tomorrowPlan.coach_message}</div>
-                    </section>
-                  </div>
-                ) : (
-                  <div className="review-empty-state">
-                    <p>Daily Review のあとで、明日の練習方針を組み立てます。</p>
-                    <p>「次の一問」ではなく、「明日はこれを見ましょう」を残します。</p>
-                    <p>まずは今日の傾向を整理してから進みます。</p>
-                  </div>
-                )}
-
-                <button
-                  className="primary-button"
-                  onClick={() => void generateTomorrowPlan()}
-                  type="button"
-                  disabled={
-                    planActionStatus !== "idle" ||
-                    dailySession.tomorrow_plan_status === "generated" ||
-                    dailySession.review_status !== "generated"
-                  }
-                >
-                  {planActionStatus === "generating"
-                    ? "Generating..."
-                    : dailySession.tomorrow_plan_status === "generated"
-                      ? "Tomorrow Plan Generated"
-                      : "Generate Tomorrow Plan"}
-                </button>
-              </article>
-
-              {tomorrowPlan ? (
-                <article className="panel goodbye-panel">
-                  <div className="panel-heading tight">
-                    <span className="panel-kicker">Goodbye</span>
-                    <h3>お疲れさまでした。</h3>
-                  </div>
-                  <div className="reflection-box">
-                    {`明日は${tomorrowPlan.focus_theme}を重点的に見ていきます。`}
-                  </div>
-                </article>
-              ) : null}
-            </>
-          ) : null}
         </div>
       </section>
     </main>
