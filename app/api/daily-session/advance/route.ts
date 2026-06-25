@@ -7,12 +7,16 @@ import {
   getObservationEventsForDailySession,
   getTomorrowPlanForSession
 } from "@/lib/deliberation/session-memory";
-import type { ObservationEventInput } from "@/lib/deliberation/types";
+import type { LearnerChoice, ObservationEventInput } from "@/lib/deliberation/types";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  const body = (await request.json()) as { sessionId?: string; observation?: ObservationEventInput };
+  const body = (await request.json()) as {
+    sessionId?: string;
+    observation?: ObservationEventInput;
+    learner_choice?: LearnerChoice;
+  };
 
   if (!body.sessionId) {
     return NextResponse.json({ error: "sessionId is required" }, { status: 400 });

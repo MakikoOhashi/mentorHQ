@@ -10,7 +10,9 @@ import type {
   DeliberationEvent,
   DeliberationResponse,
   LearnerCase,
+  LearnerChoice,
   ObservationEvent,
+  ObservationEventInput,
   TomorrowPlan
 } from "@/lib/deliberation/types";
 
@@ -38,6 +40,16 @@ type LearnerStep =
   | "tomorrow"
   | "goodbye";
 
+type QuestionOption = {
+  label: string;
+  value: LearnerChoice;
+};
+
+type QuestionConfig = {
+  prompt: string;
+  options: QuestionOption[];
+};
+
 const STEP_ORDER: LearnerStep[] = [
   "morning",
   "question-1",
@@ -58,6 +70,34 @@ const STEP_LABELS: Record<LearnerStep, string> = {
   goodbye: "Goodbye"
 };
 
+const QUESTION_CONFIGS: Record<string, QuestionConfig> = {
+  q1: {
+    prompt: "どこから数え始めますか？",
+    options: [
+      { label: "最初から", value: "first_position" },
+      { label: "条件を満たしたところから", value: "condition_start" },
+      { label: "わからない", value: "unknown_start" }
+    ]
+  },
+  q2: {
+    prompt: "この条件は使いますか？",
+    options: [
+      { label: "使う", value: "use_condition" },
+      { label: "使わない", value: "ignore_condition" },
+      { label: "迷っている", value: "unsure_condition" }
+    ]
+  },
+  q3: {
+    prompt: "答える前に何を確認しますか？",
+    options: [
+      { label: "起算点", value: "check_starting_point" },
+      { label: "条件句", value: "check_condition" },
+      { label: "単位", value: "check_unit" },
+      { label: "そのまま答える", value: "answer_directly" }
+    ]
+  }
+};
+
 const EVENT_DURATIONS: Record<DeliberationEvent["type"], number> = {
   observation: 1500,
   challenge: 2000,
@@ -66,10 +106,77 @@ const EVENT_DURATIONS: Record<DeliberationEvent["type"], number> = {
   coach_decision: 3000
 };
 
+const CHOICE_OBSERVATION_MAP: Record<LearnerChoice, Omit<ObservationEventInput, "daily_session_id" | "question_id" | "question_index">> = {
+  first_position: {
+    misunderstanding_type: "starting_point_confusion",
+    intervention_type: "starting_point_check",
+    confidence: 0.82,
+    note: "起算点を最初に置いている可能性があります"
+  },
+  condition_start: {
+    misunderstanding_type: "stable_progress",
+    intervention_type: "light_monitoring",
+    confidence: 0.7,
+    note: "条件を見て起算点を調整できています"
+  },
+  unknown_start: {
+    misunderstanding_type: "starting_point_confusion",
+    intervention_type: "starting_point_check",
+    confidence: 0.58,
+    note: "起算点の置き方をまだ迷っています"
+  },
+  use_condition: {
+    misunderstanding_type: "stable_progress",
+    intervention_type: "light_monitoring",
+    confidence: 0.74,
+    note: "条件句を判断材料として使えています"
+  },
+  ignore_condition: {
+    misunderstanding_type: "condition_omission",
+    intervention_type: "condition_check",
+    confidence: 0.84,
+    note: "条件句を読み飛ばしている可能性があります"
+  },
+  unsure_condition: {
+    misunderstanding_type: "condition_omission",
+    intervention_type: "condition_check",
+    confidence: 0.62,
+    note: "条件句を使う場面で迷いが残っています"
+  },
+  check_starting_point: {
+    misunderstanding_type: "stable_progress",
+    intervention_type: "light_monitoring",
+    confidence: 0.72,
+    note: "答える前に起算点を確認しようとしています"
+  },
+  check_condition: {
+    misunderstanding_type: "stable_progress",
+    intervention_type: "light_monitoring",
+    confidence: 0.72,
+    note: "答える前に条件句へ目を向けています"
+  },
+  check_unit: {
+    misunderstanding_type: "stable_progress",
+    intervention_type: "light_monitoring",
+    confidence: 0.66,
+    note: "単位の確認を挟んで慎重に進めています"
+  },
+  answer_directly: {
+    misunderstanding_type: "rushed_answer",
+    intervention_type: "slow_down_prompt",
+    confidence: 0.86,
+    note: "確認せずに答えへ進む傾向があります"
+  }
+};
+
 function getObservationIcon(observation: ObservationEvent) {
   if (observation.intervention_type === "starting_point_check") return "🧠";
-  if (observation.intervention_type === "contrast_check") return "🔁";
-  if (observation.intervention_type === "integrated_retry") return "💭";
+  if (observation.intervention_type === "contrast_check" || observation.intervention_type === "condition_check") {
+    return "🔁";
+  }
+  if (observation.intervention_type === "integrated_retry" || observation.intervention_type === "slow_down_prompt") {
+    return "💭";
+  }
   return "📌";
 }
 
@@ -121,6 +228,25 @@ function formatObservationTime(createdAt: string | null, index: number) {
   return `09:${String(index * 2 + 1).padStart(2, "0")}`;
 }
 
+function buildObservationFromChoice(params: {
+  dailySessionId: string;
+  questionId: string;
+  questionIndex: number;
+  learnerChoice: LearnerChoice;
+}): ObservationEventInput {
+  const mapped = CHOICE_OBSERVATION_MAP[params.learnerChoice];
+
+  return {
+    daily_session_id: params.dailySessionId,
+    question_id: params.questionId,
+    question_index: params.questionIndex,
+    intervention_type: mapped.intervention_type,
+    misunderstanding_type: mapped.misunderstanding_type,
+    confidence: mapped.confidence,
+    note: mapped.note
+  };
+}
+
 export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const [learnerCase, setLearnerCase] = useState(initialCase);
   const [dailySession, setDailySession] = useState<DailySession | null>(null);
@@ -129,7 +255,6 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const [latestObservation, setLatestObservation] = useState<ObservationEvent | null>(null);
   const [dailyReview, setDailyReview] = useState<DailyReview | null>(null);
   const [tomorrowPlan, setTomorrowPlan] = useState<TomorrowPlan | null>(null);
-  const [sessionStatusMessage, setSessionStatusMessage] = useState<string>("開始前です。");
   const [events, setEvents] = useState<DeliberationEvent[]>([]);
   const [decision, setDecision] = useState<CoachDecision | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "streaming" | "done" | "error">("idle");
@@ -139,6 +264,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const [learnerStepOverride, setLearnerStepOverride] = useState<LearnerStep | null>(null);
   const [mode, setMode] = useState<"mock" | "ai">("mock");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [currentChoice, setCurrentChoice] = useState<LearnerChoice | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const timeoutIdsRef = useRef<number[]>([]);
 
   const clearScheduledUpdates = useCallback(() => {
@@ -146,12 +273,28 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     timeoutIdsRef.current = [];
   }, []);
 
+  const clearLearnerFlow = useCallback(() => {
+    setDailySession(null);
+    setCurrentQuestionId(null);
+    setObservations([]);
+    setLatestObservation(null);
+    setDailyReview(null);
+    setTomorrowPlan(null);
+    setLearnerCase(initialCase);
+    setEvents([]);
+    setDecision(null);
+    setStatus("idle");
+    setErrorMessage(null);
+    setCurrentChoice(null);
+    setLearnerStepOverride(null);
+    clearScheduledUpdates();
+  }, [clearScheduledUpdates, initialCase]);
+
   const runDeliberation = useCallback(async (targetCase?: LearnerCase) => {
     clearScheduledUpdates();
     setStatus("loading");
     setEvents([]);
     setDecision(null);
-    setErrorMessage(null);
 
     try {
       const response = await fetch("/api/deliberate", {
@@ -189,11 +332,11 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
             timeoutIdsRef.current.push(decisionTimeoutId);
           }
         }, getCumulativeEventDelay(payload.deliberation_events, index));
+
         timeoutIdsRef.current.push(timeoutId);
       });
-    } catch (error) {
+    } catch {
       setStatus("error");
-      setErrorMessage(error instanceof Error ? error.message : "Unknown error");
     }
   }, [clearScheduledUpdates, learnerCase]);
 
@@ -201,34 +344,26 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     clearScheduledUpdates();
   }, [clearScheduledUpdates]);
 
-  const applyDailySessionPayload = useCallback(
-    (payload: DailySessionPayload) => {
-      setDailySession(payload.session);
-      setCurrentQuestionId(payload.currentQuestionId);
-      setObservations(payload.observations);
-      setLatestObservation(payload.latestObservation);
-      setDailyReview(payload.dailyReview);
-      setTomorrowPlan(payload.tomorrowPlan);
-      setSessionStatusMessage(
-        payload.session.status === "completed"
-          ? "今日の3問セッションは完了しました。"
-          : "今日の固定3問セッションを進行中です。"
-      );
+  const applyDailySessionPayload = useCallback((payload: DailySessionPayload) => {
+    setDailySession(payload.session);
+    setCurrentQuestionId(payload.currentQuestionId);
+    setObservations(payload.observations);
+    setLatestObservation(payload.latestObservation);
+    setDailyReview(payload.dailyReview);
+    setTomorrowPlan(payload.tomorrowPlan);
+    setCurrentChoice(null);
 
-      if (payload.learnerCase) {
-        setLearnerCase(payload.learnerCase);
-      }
+    if (payload.learnerCase) {
+      setLearnerCase(payload.learnerCase);
+    }
 
-      if (payload.session.status === "completed") {
-        clearScheduledUpdates();
-        setEvents([]);
-        setDecision(null);
-        setStatus("idle");
-        setErrorMessage(null);
-      }
-    },
-    [clearScheduledUpdates]
-  );
+    if (payload.session.status === "completed") {
+      clearScheduledUpdates();
+      setEvents([]);
+      setDecision(null);
+      setStatus("idle");
+    }
+  }, [clearScheduledUpdates]);
 
   useEffect(() => {
     let cancelled = false;
@@ -285,7 +420,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       applyDailySessionPayload(payload);
 
       if (payload.learnerCase) {
-        await runDeliberation(payload.learnerCase);
+        void runDeliberation(payload.learnerCase);
       }
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Unknown error");
@@ -303,6 +438,24 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     setErrorMessage(null);
 
     try {
+      const observation =
+        currentQuestionId && currentChoice
+          ? buildObservationFromChoice({
+              dailySessionId: dailySession.id,
+              questionId: currentQuestionId,
+              questionIndex: dailySession.current_index,
+              learnerChoice: currentChoice
+            })
+          : currentQuestionId && decision
+            ? buildObservationInput({
+                dailySessionId: dailySession.id,
+                questionId: currentQuestionId,
+                questionIndex: dailySession.current_index,
+                coachDecision: decision,
+                deliberationEvents: events
+              })
+            : undefined;
+
       const response = await fetch("/api/daily-session/advance", {
         method: "POST",
         headers: {
@@ -310,16 +463,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
         },
         body: JSON.stringify({
           sessionId: dailySession.id,
-          observation:
-            currentQuestionId && decision
-              ? buildObservationInput({
-                  dailySessionId: dailySession.id,
-                  questionId: currentQuestionId,
-                  questionIndex: dailySession.current_index,
-                  coachDecision: decision,
-                  deliberationEvents: events
-                })
-              : undefined
+          learner_choice: currentChoice ?? undefined,
+          observation
         })
       });
 
@@ -332,14 +477,14 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       applyDailySessionPayload(payload);
 
       if (payload.session.status !== "completed" && payload.learnerCase) {
-        await runDeliberation(payload.learnerCase);
+        void runDeliberation(payload.learnerCase);
       }
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Unknown error");
     } finally {
       setSessionActionStatus("idle");
     }
-  }, [applyDailySessionPayload, currentQuestionId, dailySession, decision, events, runDeliberation]);
+  }, [applyDailySessionPayload, currentChoice, currentQuestionId, dailySession, decision, events, runDeliberation]);
 
   const generateDailyReview = useCallback(async () => {
     if (!dailySession || dailySession.status !== "completed") {
@@ -420,12 +565,10 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const completedQuestionCount = dailySession
     ? Math.min(dailySession.current_index, dailySession.question_ids.length)
     : 0;
-  const canAdvance = dailySession !== null && dailySession.status !== "completed" && status === "done";
-  const isFinalActiveQuestion =
-    dailySession !== null &&
-    dailySession.status !== "completed" &&
-    dailySession.current_index === dailySession.question_ids.length - 1;
-  const questionCtaLabel = isFinalActiveQuestion ? "Submit and open Daily Review" : "Submit and go next";
+  const currentQuestionConfig = currentQuestionId ? QUESTION_CONFIGS[currentQuestionId] : null;
+  const isQuestionStep = currentStep.startsWith("question-");
+  const questionButtonLabel =
+    currentStep === "question-3" ? "今日のふりかえりへ" : currentChoice ? "次へ" : "答える";
 
   return (
     <main className="demo-viewport">
@@ -433,9 +576,57 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
         <article className="phone-frame">
           <div className="device-scroll-shell">
             <div className="phone-chrome">
-              <div>
-                <p className="phone-app-label">Learner App</p>
-                <p className="phone-app-name">MentorHQ Student</p>
+              <div className="phone-menu-wrap">
+                <button
+                  aria-expanded={menuOpen}
+                  aria-label="メニュー"
+                  className="menu-button"
+                  onClick={() => setMenuOpen((current) => !current)}
+                  type="button"
+                >
+                  <span />
+                  <span />
+                  <span />
+                </button>
+                {menuOpen ? (
+                  <div className="phone-menu-panel">
+                    <button
+                      className="phone-menu-item"
+                      onClick={() => {
+                        clearLearnerFlow();
+                        setMenuOpen(false);
+                      }}
+                      type="button"
+                    >
+                      最初から
+                    </button>
+                    <button
+                      className="phone-menu-item"
+                      onClick={() => {
+                        setLearnerStepOverride("morning");
+                        setMenuOpen(false);
+                      }}
+                      type="button"
+                    >
+                      今日の流れ
+                    </button>
+                    <button
+                      className="phone-menu-item"
+                      onClick={() => {
+                        clearLearnerFlow();
+                        void startDailySession();
+                        setMenuOpen(false);
+                      }}
+                      type="button"
+                    >
+                      デモをリセット
+                    </button>
+                  </div>
+                ) : null}
+                <div>
+                  <p className="phone-app-label">Learner App</p>
+                  <p className="phone-app-name">MentorHQ Student</p>
+                </div>
               </div>
               <div className="phone-status">
                 <span>{STEP_LABELS[currentStep]}</span>
@@ -460,12 +651,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                     <span className="panel-kicker">Morning Brief</span>
                     <h3>今日の学習開始</h3>
                   </div>
-                  <p className="body-copy">
-                    今日は3問だけ進めます。AIコーチは答えを急がず、迷い方や見落とし方を静かに観察します。
-                  </p>
-                  <div className="reflection-box">
-                    Start Daily Session を押すと Question 1 に進みます。
-                  </div>
+                  <p className="body-copy">今日は3問だけ進めます。問題を見て、選んで、次へ進みます。</p>
+                  <div className="reflection-box">Start Daily Session を押すと 1問目が始まります。</div>
                   <button
                     className="primary-button phone-button"
                     onClick={() => void startDailySession()}
@@ -477,45 +664,43 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                 </>
               ) : null}
 
-              {currentStep.startsWith("question-") ? (
+              {isQuestionStep && currentQuestionConfig ? (
                 <>
                   <div className="panel-heading tight">
                     <span className="panel-kicker">{STEP_LABELS[currentStep]}</span>
-                    <h3>{learnerCase.questionTitle}</h3>
+                    <h3>{currentQuestionConfig.prompt}</h3>
                   </div>
                   <div className="question-meta-strip">
                     <span>{activeQuestionNumber} / {totalQuestions}</span>
-                    <span>{sessionStatusMessage}</span>
+                    <span>{learnerCase.theme}</span>
                   </div>
                   <p className="body-copy">{learnerCase.questionStem}</p>
                   <div className="prompt-card">
-                    <span className="summary-label">Current Focus</span>
+                    <span className="summary-label">今日の問題</span>
                     <p>{learnerCase.currentLeg}</p>
                   </div>
-                  <div className="phone-answer-block">
-                    <span className="summary-label">Learner Answer</span>
-                    <div className="reflection-box">{learnerCase.learnerAnswer}</div>
-                  </div>
-                  <div className="phone-answer-block">
-                    <span className="summary-label">Why they chose it</span>
-                    <div className="reflection-box">{learnerCase.reason}</div>
-                  </div>
-                  <div className="phone-answer-block">
-                    <span className="summary-label">Ground Truth</span>
-                    <div className="reflection-box">{learnerCase.objectiveTruth}</div>
-                  </div>
-                  <div className="quiet-status-box">
-                    {status === "loading" || status === "streaming"
-                      ? "AI coach is observing this answer in the background..."
-                      : "観察の下書きができました。次へ進めます。"}
+                  <div className="choice-list" role="radiogroup" aria-label={currentQuestionConfig.prompt}>
+                    {currentQuestionConfig.options.map((option) => (
+                      <button
+                        aria-checked={currentChoice === option.value}
+                        className={`choice-card ${currentChoice === option.value ? "is-selected" : ""}`}
+                        key={option.value}
+                        onClick={() => setCurrentChoice(option.value)}
+                        role="radio"
+                        type="button"
+                      >
+                        <span className="choice-marker" aria-hidden="true" />
+                        <span>{option.label}</span>
+                      </button>
+                    ))}
                   </div>
                   <button
                     className="primary-button phone-button"
                     onClick={() => void advanceToNextQuestion()}
                     type="button"
-                    disabled={!canAdvance || sessionActionStatus !== "idle"}
+                    disabled={!currentChoice || sessionActionStatus !== "idle"}
                   >
-                    {sessionActionStatus === "advancing" ? "Submitting..." : questionCtaLabel}
+                    {sessionActionStatus === "advancing" ? "進んでいます..." : questionButtonLabel}
                   </button>
                 </>
               ) : null}
@@ -524,7 +709,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                 <>
                   <div className="panel-heading tight">
                     <span className="panel-kicker">Daily Coach Review</span>
-                    <h3>今日の振り返り</h3>
+                    <h3>今日のふりかえり</h3>
                   </div>
                   {dailyReview ? (
                     <div className="daily-review-content">
@@ -548,15 +733,11 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                           ))}
                         </div>
                       </section>
-                      <section className="daily-review-block">
-                        <span className="summary-label">Coach Comment</span>
-                        <div className="reflection-box">{dailyReview.coach_comment}</div>
-                      </section>
                     </div>
                   ) : (
                     <div className="review-empty-state">
-                      <p>3問分の観察が集まりました。</p>
-                      <p>ここで初めて、今日の傾向を短く整理します。</p>
+                      <p>3問分の様子がそろいました。</p>
+                      <p>ここで今日の流れを短くまとめます。</p>
                     </div>
                   )}
                   {dailyReview ? (
@@ -565,7 +746,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                       onClick={() => setLearnerStepOverride(null)}
                       type="button"
                     >
-                      Next: Tomorrow Plan
+                      明日の練習を見る
                     </button>
                   ) : (
                     <button
@@ -574,7 +755,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                       type="button"
                       disabled={reviewActionStatus !== "idle"}
                     >
-                      {reviewActionStatus === "generating" ? "Generating..." : "Generate Daily Review"}
+                      {reviewActionStatus === "generating" ? "作成中..." : "今日のふりかえりへ"}
                     </button>
                   )}
                 </>
@@ -584,7 +765,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                 <>
                   <div className="panel-heading tight">
                     <span className="panel-kicker">Tomorrow Plan</span>
-                    <h3>明日の進め方</h3>
+                    <h3>明日の練習</h3>
                   </div>
                   {tomorrowPlan ? (
                     <div className="daily-review-content">
@@ -608,15 +789,10 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                           ))}
                         </div>
                       </section>
-                      <section className="daily-review-block">
-                        <span className="summary-label">Coach Message</span>
-                        <div className="reflection-box">{tomorrowPlan.coach_message}</div>
-                      </section>
                     </div>
                   ) : (
                     <div className="review-empty-state">
-                      <p>Daily Review をもとに、明日の重点候補を組み立てます。</p>
-                      <p>まだ最終評価ではなく、次回の見方を残します。</p>
+                      <p>今日のふりかえりをもとに、明日の練習を組み立てます。</p>
                     </div>
                   )}
                   {tomorrowPlan ? (
@@ -625,7 +801,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                       onClick={() => setLearnerStepOverride(null)}
                       type="button"
                     >
-                      Finish
+                      おわる
                     </button>
                   ) : (
                     <button
@@ -634,7 +810,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                       type="button"
                       disabled={planActionStatus !== "idle" || dailySession?.review_status !== "generated"}
                     >
-                      {planActionStatus === "generating" ? "Generating..." : "Generate Tomorrow Plan"}
+                      {planActionStatus === "generating" ? "作成中..." : "明日の練習を見る"}
                     </button>
                   )}
                 </>
@@ -648,19 +824,16 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                   </div>
                   <div className="reflection-box">
                     {tomorrowPlan
-                      ? `明日は ${tomorrowPlan.focus_theme} を重点的に確認します。`
-                      : "明日の重点をこのまま持ち帰ります。"}
+                      ? `明日は ${tomorrowPlan.focus_theme} を意識して進めます。`
+                      : "明日の流れを持ち帰ります。"}
                   </div>
-                  <p className="body-copy">
-                    Observation Stream はこのまま残るので、今日の迷い方をあとから見返せます。
-                  </p>
                   <button
                     className="primary-button phone-button"
                     onClick={() => void startDailySession()}
                     type="button"
                     disabled={sessionActionStatus !== "idle"}
                   >
-                    {sessionActionStatus === "starting" ? "Starting..." : "Start New Session"}
+                    {sessionActionStatus === "starting" ? "Starting..." : "最初から"}
                   </button>
                 </>
               ) : null}
@@ -681,14 +854,16 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
               <div>
                 <span className="panel-kicker">AI Coach Mind</span>
                 <h3>まだ判断せず、観察だけを積みます</h3>
-                <p className="device-caption">{learnerCase.exam} / {mode === "ai" ? "AI Deliberation" : "Mock Fallback"}</p>
+                <p className="device-caption">
+                  {learnerCase.exam} / {mode === "ai" ? "AI Deliberation" : "Mock Fallback"}
+                </p>
               </div>
               <span className="observation-count-pill">
                 {dailySession ? `${dailySession.observation_count} observations` : "0 observations"}
               </span>
             </div>
             <p className="observation-intro-copy">
-              起算点や条件句、迷い方の癖をメモしています。結論は Review まで持ち込みません。
+              起算点や条件句、答える前の確認の仕方を記録しています。結論は Review まで持ち込みません。
             </p>
 
             {latestObservation ? (

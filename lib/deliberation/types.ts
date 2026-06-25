@@ -13,7 +13,10 @@ export const SELECTED_INTERVENTIONS = [
   "leg_breakdown",
   "contrast_check",
   "starting_point_check",
-  "integrated_retry"
+  "integrated_retry",
+  "light_monitoring",
+  "condition_check",
+  "slow_down_prompt"
 ] as const;
 
 export type SelectedIntervention = (typeof SELECTED_INTERVENTIONS)[number];
@@ -98,6 +101,8 @@ export type DailySession = {
 export const OBSERVATION_MISUNDERSTANDING_TYPES = [
   "starting_point_confusion",
   "condition_omission",
+  "stable_progress",
+  "rushed_answer",
   "unknown"
 ] as const;
 
@@ -124,6 +129,21 @@ export type ObservationEventInput = {
   confidence: number | null;
   note: string;
 };
+
+export const LEARNER_CHOICES = [
+  "first_position",
+  "condition_start",
+  "unknown_start",
+  "use_condition",
+  "ignore_condition",
+  "unsure_condition",
+  "check_starting_point",
+  "check_condition",
+  "check_unit",
+  "answer_directly"
+] as const;
+
+export type LearnerChoice = (typeof LEARNER_CHOICES)[number];
 
 export type DailyReview = {
   id: string;

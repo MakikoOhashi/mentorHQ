@@ -7,6 +7,10 @@ function getMisunderstandingLabel(value: ObservationEvent["misunderstanding_type
       return "起算点の取り方";
     case "condition_omission":
       return "条件句の読み取り";
+    case "stable_progress":
+      return "条件を見て進める姿勢";
+    case "rushed_answer":
+      return "確認前に答える傾向";
     case "unknown":
       return "判断根拠の置き方";
     default:
@@ -21,7 +25,9 @@ function getMostRepeatedMisunderstanding(
   if (memorySummary?.repeatedMisunderstandingDetected && memorySummary.mostRepeatedMisunderstanding) {
     if (
       memorySummary.mostRepeatedMisunderstanding === "starting_point_confusion" ||
-      memorySummary.mostRepeatedMisunderstanding === "condition_omission"
+      memorySummary.mostRepeatedMisunderstanding === "condition_omission" ||
+      memorySummary.mostRepeatedMisunderstanding === "stable_progress" ||
+      memorySummary.mostRepeatedMisunderstanding === "rushed_answer"
     ) {
       return memorySummary.mostRepeatedMisunderstanding;
     }
@@ -45,6 +51,14 @@ function buildTomorrowFocus(misunderstandingType: ObservationEvent["misunderstan
 
   if (misunderstandingType === "condition_omission") {
     return "明日は条件句を先に拾い、結論の前に落としていない前提がないかを見ます。";
+  }
+
+  if (misunderstandingType === "stable_progress") {
+    return "明日は条件を見てから答える流れを保ち、安定して再現できるかを見ます。";
+  }
+
+  if (misunderstandingType === "rushed_answer") {
+    return "明日は答える前の確認を一拍置き、起算点や条件句を先に見る流れを整えます。";
   }
 
   return "明日は判断根拠を短く言い直してから、結論に進む流れを見ます。";
@@ -76,6 +90,10 @@ export function buildDailyReviewInput(params: {
         ? "今日は起算点を置く場所で迷いが残りました。まだ断定せず、明日も同じ入口から短く確認します。"
         : repeatedMisunderstanding === "condition_omission"
           ? "今日は条件句を拾う前に結論へ進みがちでした。明日も読み落としの有無を先に見ます。"
+          : repeatedMisunderstanding === "stable_progress"
+            ? "今日は条件を見てから答える流れが見えていました。明日も同じ姿勢が安定するかを見ます。"
+            : repeatedMisunderstanding === "rushed_answer"
+              ? "今日は確認前に答えへ進む傾向が見えました。明日は一拍置く流れを先に整えます。"
           : "今日は根拠の置き方に揺れが見えました。まだ判断せず、明日も同じ観点で短く追います。"
   };
 }

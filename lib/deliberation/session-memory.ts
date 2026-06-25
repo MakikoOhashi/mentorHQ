@@ -45,7 +45,12 @@ export type MemorySummary = {
   memoryMessageHint: string;
 };
 
-type MisunderstandingType = "starting_point_confusion" | "condition_omission" | "unknown";
+type MisunderstandingType =
+  | "starting_point_confusion"
+  | "condition_omission"
+  | "stable_progress"
+  | "rushed_answer"
+  | "unknown";
 
 type SaveSessionInput = {
   learnerCase: LearnerCase;
@@ -99,6 +104,12 @@ function getInterventionLabel(intervention: DeliberationResponse["coach_decision
       return "統合リトライ";
     case "leg_breakdown":
       return "脚分解";
+    case "light_monitoring":
+      return "軽い観察";
+    case "condition_check":
+      return "条件確認";
+    case "slow_down_prompt":
+      return "確認促し";
     default:
       return intervention;
   }
@@ -110,6 +121,10 @@ function getMisunderstandingLabel(misunderstandingType: string | null): string {
       return "起算点の誤解";
     case "condition_omission":
       return "条件の読み落とし";
+    case "stable_progress":
+      return "安定して確認できている";
+    case "rushed_answer":
+      return "急いで答えやすい";
     case "unknown":
       return "誤解パターン";
     default:
@@ -386,12 +401,21 @@ function isSelectedIntervention(value: unknown): value is ObservationEvent["inte
     value === "leg_breakdown" ||
     value === "contrast_check" ||
     value === "starting_point_check" ||
-    value === "integrated_retry"
+    value === "integrated_retry" ||
+    value === "light_monitoring" ||
+    value === "condition_check" ||
+    value === "slow_down_prompt"
   );
 }
 
 function isObservationMisunderstandingType(value: unknown): value is ObservationEvent["misunderstanding_type"] {
-  return value === "starting_point_confusion" || value === "condition_omission" || value === "unknown";
+  return (
+    value === "starting_point_confusion" ||
+    value === "condition_omission" ||
+    value === "stable_progress" ||
+    value === "rushed_answer" ||
+    value === "unknown"
+  );
 }
 
 function formatCounts(items: string[]): string[] {

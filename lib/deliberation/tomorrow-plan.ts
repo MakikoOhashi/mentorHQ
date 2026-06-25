@@ -12,7 +12,9 @@ function getRepeatedMisunderstanding(
   if (memorySummary?.repeatedMisunderstandingDetected && memorySummary.mostRepeatedMisunderstanding) {
     if (
       memorySummary.mostRepeatedMisunderstanding === "starting_point_confusion" ||
-      memorySummary.mostRepeatedMisunderstanding === "condition_omission"
+      memorySummary.mostRepeatedMisunderstanding === "condition_omission" ||
+      memorySummary.mostRepeatedMisunderstanding === "stable_progress" ||
+      memorySummary.mostRepeatedMisunderstanding === "rushed_answer"
     ) {
       return memorySummary.mostRepeatedMisunderstanding;
     }
@@ -38,6 +40,14 @@ function buildFocusTheme(misunderstanding: ObservationEvent["misunderstanding_ty
     return "条件句を拾ってから結論へ進む";
   }
 
+  if (misunderstanding === "stable_progress") {
+    return "条件を見てから判断する流れを安定させる";
+  }
+
+  if (misunderstanding === "rushed_answer") {
+    return "答える前に確認を一拍置く";
+  }
+
   return "判断根拠を短く置いてから答える";
 }
 
@@ -55,6 +65,22 @@ function buildPracticeItems(misunderstanding: ObservationEvent["misunderstanding
       "条件句を読み取る問題を2問",
       "解答前に『例外・要件・但し書き』があるかを確認する",
       "結論を書く前に落としている前提がないかを1回見直す"
+    ];
+  }
+
+  if (misunderstanding === "stable_progress") {
+    return [
+      "条件を使って判断する問題を2問",
+      "答える前に『何が起点になるか』を一言で確認する",
+      "落ち着いて答える流れを同じ手順で再現する"
+    ];
+  }
+
+  if (misunderstanding === "rushed_answer") {
+    return [
+      "答える前に確認を入れる問題を2問",
+      "起算点・条件句・単位のどれを見るかを先に決める",
+      "そのまま答えたくなったら一度だけ見直す"
     ];
   }
 
@@ -80,6 +106,20 @@ function buildCautionPoints(misunderstanding: ObservationEvent["misunderstanding
     ];
   }
 
+  if (misunderstanding === "stable_progress") {
+    return [
+      "慣れてきても確認の順番を省略しない",
+      "条件を見た後に結論へ進む流れを崩さない"
+    ];
+  }
+
+  if (misunderstanding === "rushed_answer") {
+    return [
+      "急いで結論に飛ばない",
+      "確認項目を決めずにそのまま答えない"
+    ];
+  }
+
   return [
     "結論先行で進みすぎない",
     "判断根拠が曖昧なまま答えない"
@@ -96,6 +136,14 @@ function buildCoachMessage(
 
   if (misunderstanding === "condition_omission") {
     return `明日は「${focusTheme}」を軸に、結論より先に条件を拾う流れを固めます。`;
+  }
+
+  if (misunderstanding === "stable_progress") {
+    return `明日は「${focusTheme}」を軸に、今できている確認の順番をそのまま安定させます。`;
+  }
+
+  if (misunderstanding === "rushed_answer") {
+    return `明日は「${focusTheme}」を軸に、答える前の一拍を先に作ります。`;
   }
 
   return `明日は「${focusTheme}」を軸に、判断根拠を置いてから答える流れを整えます。`;
