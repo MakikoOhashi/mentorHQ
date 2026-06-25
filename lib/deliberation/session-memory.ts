@@ -1268,7 +1268,6 @@ export async function getObservationEventsForDailySession(dailySessionId: string
     const snapshot = await firestore
       .collection(OBSERVATION_EVENTS_COLLECTION)
       .where("daily_session_id", "==", dailySessionId)
-      .orderBy("question_index", "asc")
       .get();
 
     if (snapshot.empty) {
@@ -1277,7 +1276,18 @@ export async function getObservationEventsForDailySession(dailySessionId: string
 
     return snapshot.docs
       .map((eventSnapshot) => toSerializableObservationEvent(eventSnapshot))
-      .filter((event): event is ObservationEvent => event !== null);
+      .filter((event): event is ObservationEvent => event !== null)
+      .sort((left, right) => {
+        if (left.question_index !== right.question_index) {
+          return left.question_index - right.question_index;
+        }
+
+        if (left.created_at && right.created_at) {
+          return left.created_at.localeCompare(right.created_at);
+        }
+
+        return left.id.localeCompare(right.id);
+      });
   } catch (error) {
     if (isMissingDefaultCredentialsError(error)) {
       disableFirestoreRuntime();
