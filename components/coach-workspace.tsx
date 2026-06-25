@@ -50,6 +50,17 @@ type QuestionConfig = {
   options: QuestionOption[];
 };
 
+type QuestionCardState = "asking" | "feedback";
+
+type FeedbackSeverity = "good" | "caution" | "retry";
+
+type LatestFeedback = {
+  title: string;
+  message: string;
+  nextHint: string;
+  severity: FeedbackSeverity;
+};
+
 const STEP_ORDER: LearnerStep[] = [
   "morning",
   "question-1",
@@ -169,6 +180,69 @@ const CHOICE_OBSERVATION_MAP: Record<LearnerChoice, Omit<ObservationEventInput, 
   }
 };
 
+const FEEDBACK_MAP: Record<LearnerChoice, LatestFeedback> = {
+  first_position: {
+    severity: "caution",
+    title: "起算点に注意",
+    message: "最初から数えたくなる問題ですが、条件を満たした位置から考える必要があります。",
+    nextHint: "次の問題では「どこから数えるか」を先に決めましょう。"
+  },
+  condition_start: {
+    severity: "good",
+    title: "良い進め方です",
+    message: "条件を見てから起算点を調整できています。",
+    nextHint: "次も、答える前に条件を一度確認しましょう。"
+  },
+  unknown_start: {
+    severity: "retry",
+    title: "ここは大事です",
+    message: "起算点をどこに置くかがまだ揺れています。数え始める位置を先に決めましょう。",
+    nextHint: "次の問題でも「どこから数えるか」を意識して進めましょう。"
+  },
+  use_condition: {
+    severity: "good",
+    title: "良い進め方です",
+    message: "条件を判断材料として使えています。",
+    nextHint: "次も、条件を見てから結論へ進みましょう。"
+  },
+  ignore_condition: {
+    severity: "caution",
+    title: "条件句を見落としています",
+    message: "条件を使わずに進めると、答えがずれやすくなります。",
+    nextHint: "次は「この条件は使う？」を先に確認しましょう。"
+  },
+  unsure_condition: {
+    severity: "caution",
+    title: "条件句に迷いがあります",
+    message: "条件を使うか迷ったときほど、本文を一度止まって確認するのが大切です。",
+    nextHint: "次は条件句を一つ拾ってから答えましょう。"
+  },
+  check_starting_point: {
+    severity: "good",
+    title: "良い確認です",
+    message: "答える前に起算点を確かめる流れができています。",
+    nextHint: "次も、その確認を先に入れてから進みましょう。"
+  },
+  check_condition: {
+    severity: "good",
+    title: "良い確認です",
+    message: "条件句を見てから答えようとできています。",
+    nextHint: "次も、条件を一度確認してから答えましょう。"
+  },
+  check_unit: {
+    severity: "good",
+    title: "丁寧に進められています",
+    message: "答える前に単位を確認できています。",
+    nextHint: "次も、確認ポイントを一つ決めてから進みましょう。"
+  },
+  answer_directly: {
+    severity: "retry",
+    title: "少し急いでいます",
+    message: "答える前に、起算点・条件・単位のどれを見るか決めましょう。",
+    nextHint: "次の問題では確認してから進みましょう。"
+  }
+};
+
 function getObservationIcon(observation: ObservationEvent) {
   if (observation.intervention_type === "starting_point_check") return "🧠";
   if (observation.intervention_type === "contrast_check" || observation.intervention_type === "condition_check") {
@@ -265,6 +339,10 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const [mode, setMode] = useState<"mock" | "ai">("mock");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [currentChoice, setCurrentChoice] = useState<LearnerChoice | null>(null);
+  const [questionCardState, setQuestionCardState] = useState<QuestionCardState>("asking");
+  const [latestFeedback, setLatestFeedback] = useState<LatestFeedback | null>(null);
+  const [feedbackStep, setFeedbackStep] = useState<LearnerStep | null>(null);
+  const [feedbackLearnerCase, setFeedbackLearnerCase] = useState<LearnerCase | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const timeoutIdsRef = useRef<number[]>([]);
 
@@ -286,6 +364,10 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     setStatus("idle");
     setErrorMessage(null);
     setCurrentChoice(null);
+    setQuestionCardState("asking");
+    setLatestFeedback(null);
+    setFeedbackStep(null);
+    setFeedbackLearnerCase(null);
     setLearnerStepOverride(null);
     clearScheduledUpdates();
   }, [clearScheduledUpdates, initialCase]);
@@ -351,7 +433,6 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     setLatestObservation(payload.latestObservation);
     setDailyReview(payload.dailyReview);
     setTomorrowPlan(payload.tomorrowPlan);
-    setCurrentChoice(null);
 
     if (payload.learnerCase) {
       setLearnerCase(payload.learnerCase);
@@ -417,6 +498,11 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
 
       const payload = (await response.json()) as DailySessionPayload;
       setLearnerStepOverride(null);
+      setQuestionCardState("asking");
+      setLatestFeedback(null);
+      setFeedbackStep(null);
+      setFeedbackLearnerCase(null);
+      setCurrentChoice(null);
       applyDailySessionPayload(payload);
 
       if (payload.learnerCase) {
@@ -456,6 +542,10 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
               })
             : undefined;
 
+      const feedback = currentChoice ? FEEDBACK_MAP[currentChoice] : null;
+      const answeredStep = currentStep;
+      const answeredLearnerCase = learnerCase;
+
       const response = await fetch("/api/daily-session/advance", {
         method: "POST",
         headers: {
@@ -473,7 +563,12 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       }
 
       const payload = (await response.json()) as DailySessionPayload;
-      setLearnerStepOverride(null);
+      setLearnerStepOverride(payload.session.status === "completed" ? answeredStep : answeredStep);
+      setQuestionCardState("feedback");
+      setLatestFeedback(feedback);
+      setFeedbackStep(answeredStep);
+      setFeedbackLearnerCase(answeredLearnerCase);
+      setCurrentChoice(null);
       applyDailySessionPayload(payload);
 
       if (payload.session.status !== "completed" && payload.learnerCase) {
@@ -566,9 +661,26 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     ? Math.min(dailySession.current_index, dailySession.question_ids.length)
     : 0;
   const currentQuestionConfig = currentQuestionId ? QUESTION_CONFIGS[currentQuestionId] : null;
-  const isQuestionStep = currentStep.startsWith("question-");
-  const questionButtonLabel =
-    currentStep === "question-3" ? "今日のふりかえりへ" : currentChoice ? "次へ" : "答える";
+  const displayStep = questionCardState === "feedback" && feedbackStep ? feedbackStep : currentStep;
+  const isQuestionStep = displayStep.startsWith("question-");
+  const displayQuestionCase = questionCardState === "feedback" && feedbackLearnerCase ? feedbackLearnerCase : learnerCase;
+  const displayQuestionConfig =
+    questionCardState === "feedback" && feedbackStep
+      ? QUESTION_CONFIGS[`q${STEP_ORDER.indexOf(feedbackStep)}`] ?? currentQuestionConfig
+      : currentQuestionConfig;
+  const displayQuestionNumber =
+    questionCardState === "feedback" && feedbackStep
+      ? STEP_ORDER.indexOf(feedbackStep)
+      : (activeQuestionNumber ?? 1);
+  const nextQuestionLabel = feedbackStep === "question-3" ? "今日のふりかえりへ" : "次へ";
+
+  const proceedFromFeedback = useCallback(() => {
+    setQuestionCardState("asking");
+    setLatestFeedback(null);
+    setFeedbackStep(null);
+    setFeedbackLearnerCase(null);
+    setLearnerStepOverride(null);
+  }, []);
 
   return (
     <main className="demo-viewport">
@@ -604,6 +716,11 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                       className="phone-menu-item"
                       onClick={() => {
                         setLearnerStepOverride("morning");
+                        setQuestionCardState("asking");
+                        setCurrentChoice(null);
+                        setLatestFeedback(null);
+                        setFeedbackStep(null);
+                        setFeedbackLearnerCase(null);
                         setMenuOpen(false);
                       }}
                       type="button"
@@ -664,44 +781,68 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                 </>
               ) : null}
 
-              {isQuestionStep && currentQuestionConfig ? (
+              {isQuestionStep && displayQuestionConfig && displayQuestionCase ? (
                 <>
                   <div className="panel-heading tight">
-                    <span className="panel-kicker">{STEP_LABELS[currentStep]}</span>
-                    <h3>{currentQuestionConfig.prompt}</h3>
+                    <span className="panel-kicker">{STEP_LABELS[displayStep]}</span>
+                    <h3>{displayQuestionConfig.prompt}</h3>
                   </div>
                   <div className="question-meta-strip">
-                    <span>{activeQuestionNumber} / {totalQuestions}</span>
-                    <span>{learnerCase.theme}</span>
+                    <span>{displayQuestionNumber} / {totalQuestions}</span>
+                    <span>{displayQuestionCase.theme}</span>
                   </div>
-                  <p className="body-copy">{learnerCase.questionStem}</p>
+                  <p className="body-copy">{displayQuestionCase.questionStem}</p>
                   <div className="prompt-card">
                     <span className="summary-label">今日の問題</span>
-                    <p>{learnerCase.currentLeg}</p>
+                    <p>{displayQuestionCase.currentLeg}</p>
                   </div>
-                  <div className="choice-list" role="radiogroup" aria-label={currentQuestionConfig.prompt}>
-                    {currentQuestionConfig.options.map((option) => (
+                  {questionCardState === "asking" ? (
+                    <>
+                      <div className="choice-list" role="radiogroup" aria-label={displayQuestionConfig.prompt}>
+                        {displayQuestionConfig.options.map((option) => (
+                          <button
+                            aria-checked={currentChoice === option.value}
+                            className={`choice-card ${currentChoice === option.value ? "is-selected" : ""}`}
+                            key={option.value}
+                            onClick={() => setCurrentChoice(option.value)}
+                            role="radio"
+                            type="button"
+                          >
+                            <span className="choice-marker" aria-hidden="true" />
+                            <span>{option.label}</span>
+                          </button>
+                        ))}
+                      </div>
                       <button
-                        aria-checked={currentChoice === option.value}
-                        className={`choice-card ${currentChoice === option.value ? "is-selected" : ""}`}
-                        key={option.value}
-                        onClick={() => setCurrentChoice(option.value)}
-                        role="radio"
+                        className="primary-button phone-button"
+                        onClick={() => void advanceToNextQuestion()}
+                        type="button"
+                        disabled={!currentChoice || sessionActionStatus !== "idle"}
+                      >
+                        {sessionActionStatus === "advancing" ? "進んでいます..." : "答える"}
+                      </button>
+                    </>
+                  ) : latestFeedback ? (
+                    <section className={`feedback-card feedback-card--${latestFeedback.severity}`}>
+                      <span className="feedback-eyebrow">
+                        {latestFeedback.severity === "good"
+                          ? "Coach Feedback"
+                          : latestFeedback.severity === "caution"
+                            ? "Coach Feedback"
+                            : "Coach Feedback"}
+                      </span>
+                      <h4>{latestFeedback.title}</h4>
+                      <p>{latestFeedback.message}</p>
+                      <div className="feedback-next-hint">{latestFeedback.nextHint}</div>
+                      <button
+                        className="primary-button phone-button"
+                        onClick={proceedFromFeedback}
                         type="button"
                       >
-                        <span className="choice-marker" aria-hidden="true" />
-                        <span>{option.label}</span>
+                        {nextQuestionLabel}
                       </button>
-                    ))}
-                  </div>
-                  <button
-                    className="primary-button phone-button"
-                    onClick={() => void advanceToNextQuestion()}
-                    type="button"
-                    disabled={!currentChoice || sessionActionStatus !== "idle"}
-                  >
-                    {sessionActionStatus === "advancing" ? "進んでいます..." : questionButtonLabel}
-                  </button>
+                    </section>
+                  ) : null}
                 </>
               ) : null}
 
