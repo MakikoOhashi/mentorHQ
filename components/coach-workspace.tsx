@@ -36,6 +36,26 @@ function getObservationIcon(observation: ObservationEvent) {
   return "📝";
 }
 
+function getSessionExperienceStatus(session: DailySession | null): "active" | "completed" | "reviewed" | "planned" {
+  if (!session) {
+    return "active";
+  }
+
+  if (session.tomorrow_plan_status === "generated") {
+    return "planned";
+  }
+
+  if (session.review_status === "generated") {
+    return "reviewed";
+  }
+
+  if (session.status === "completed") {
+    return "completed";
+  }
+
+  return "active";
+}
+
 const EVENT_DURATIONS: Record<DeliberationEvent["type"], number> = {
   observation: 1500,
   challenge: 2000,
@@ -342,19 +362,64 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     dailySession !== null &&
     dailySession.status !== "completed" &&
     dailySession.current_index === dailySession.question_ids.length - 1;
+  const experienceStatus = getSessionExperienceStatus(dailySession);
+  const currentQuestionStep = dailySession && dailySession.status !== "completed" ? dailySession.current_index + 2 : 4;
+  const flowSteps = [
+    { label: "Morning Brief", detail: "今日は3問だけ解きます。", state: "done" },
+    { label: "Question 1", detail: "最初の迷い方を見る", state: currentQuestionStep > 2 ? "done" : currentQuestionStep === 2 ? "current" : "upcoming" },
+    { label: "Question 2", detail: "比較して傾向を見る", state: currentQuestionStep > 3 ? "done" : currentQuestionStep === 3 ? "current" : "upcoming" },
+    { label: "Question 3", detail: "最後の観察を残す", state: currentQuestionStep > 4 ? "done" : currentQuestionStep === 4 ? "current" : "upcoming" },
+    { label: "Daily Coach Review", detail: "今日の傾向を整理", state: dailySession?.review_status === "generated" ? "done" : dailySession?.status === "completed" ? "current" : "upcoming" },
+    { label: "Tomorrow Plan", detail: "明日の練習を組み直す", state: dailySession?.tomorrow_plan_status === "generated" ? "done" : dailySession?.review_status === "generated" ? "current" : "upcoming" },
+    { label: "Goodbye", detail: "明日の重点を持ち帰る", state: dailySession?.tomorrow_plan_status === "generated" ? "current" : "upcoming" }
+  ] as const;
 
   return (
     <main className="page-shell">
       <section className="hero">
         <div>
           <p className="eyebrow">MentorHQ MVP Demo</p>
-          <h1>Daily Observation Workspace</h1>
+          <h1>Daily Coaching Session</h1>
         </div>
         <div className="hero-meta">
           <span>{learnerCase.exam}</span>
           <span>{learnerCase.theme}</span>
           <span>{mode === "ai" ? "AI Deliberation" : "Mock Fallback"}</span>
+          <span>{experienceStatus}</span>
         </div>
+      </section>
+
+      <section className="session-flow-grid">
+        <article className="panel morning-brief-panel">
+          <div className="panel-heading tight">
+            <span className="panel-kicker">Morning Brief</span>
+            <h2>おはようございます。</h2>
+          </div>
+          <p className="body-copy">
+            今日は3問だけ解きます。AIは答えを急がず、学習中の迷い方を観察します。
+          </p>
+          <p className="brief-support-copy">
+            AI is observing patterns, not making a decision yet.
+          </p>
+        </article>
+
+        <article className="panel flow-panel">
+          <div className="panel-heading tight">
+            <span className="panel-kicker">Session Flow</span>
+            <h2>Morning Brief → Review → Tomorrow Plan</h2>
+          </div>
+          <div className="flow-step-list">
+            {flowSteps.map((step, index) => (
+              <section className={`flow-step flow-step-${step.state}`} key={step.label}>
+                <div className="flow-step-index">{index + 1}</div>
+                <div className="flow-step-copy">
+                  <p className="flow-step-label">{step.label}</p>
+                  <p className="flow-step-detail">{step.detail}</p>
+                </div>
+              </section>
+            ))}
+          </div>
+        </article>
       </section>
 
       <section className="workspace-grid">
@@ -398,6 +463,18 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
               <div>
                 <span className="summary-label">表示</span>
                 <div className="reflection-box">{sessionStatusMessage}</div>
+              </div>
+              <div>
+                <span className="summary-label">Session Flow</span>
+                <div className="reflection-box">
+                  {experienceStatus === "active"
+                    ? "3問学習を進めています。"
+                    : experienceStatus === "completed"
+                      ? "3問が終わり、次は Daily Coach Review です。"
+                      : experienceStatus === "reviewed"
+                        ? "今日の傾向を整理しました。次は Tomorrow Plan です。"
+                        : "Tomorrow Plan まで完了しました。"}
+                </div>
               </div>
               <div>
                 <span className="summary-label">Review Status</span>
@@ -473,6 +550,9 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                 {dailySession ? `${dailySession.observation_count} observations` : "0 observations"}
               </span>
             </div>
+            <p className="observation-intro-copy">
+              AI is observing patterns, not making a decision yet.
+            </p>
 
             {latestObservation ? (
               <section className="latest-observation-card">
@@ -585,6 +665,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                   <div className="review-empty-state">
                     <p>3問完了後に、その日の観測をまとめます。</p>
                     <p>まだ最終判断ではなく、今日の振り返りだけを残します。</p>
+                    <p>3問が終わったら、ここから自然に次へ進みます。</p>
                   </div>
                 )}
 
@@ -647,6 +728,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                   <div className="review-empty-state">
                     <p>Daily Review のあとで、明日の練習方針を組み立てます。</p>
                     <p>「次の一問」ではなく、「明日はこれを見ましょう」を残します。</p>
+                    <p>まずは今日の傾向を整理してから進みます。</p>
                   </div>
                 )}
 
@@ -667,6 +749,18 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                       : "Generate Tomorrow Plan"}
                 </button>
               </article>
+
+              {tomorrowPlan ? (
+                <article className="panel goodbye-panel">
+                  <div className="panel-heading tight">
+                    <span className="panel-kicker">Goodbye</span>
+                    <h3>お疲れさまでした。</h3>
+                  </div>
+                  <div className="reflection-box">
+                    {`明日は${tomorrowPlan.focus_theme}を重点的に見ていきます。`}
+                  </div>
+                </article>
+              ) : null}
             </>
           ) : null}
         </div>
