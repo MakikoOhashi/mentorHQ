@@ -928,14 +928,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
           <div className="device-scroll-shell coach-scroll-shell">
             <div className="simulator-status-bar tablet-simulator-status" aria-hidden="true">
               <span className="simulator-time">9:41</span>
-              <span className="tablet-status-title">AI Coach Mind</span>
               <div className="simulator-status-icons">
-                <span className="simulator-signal">
-                  <i />
-                  <i />
-                  <i />
-                  <i />
-                </span>
                 <span className="simulator-wifi">
                   <i />
                   <i />
