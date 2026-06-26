@@ -37,20 +37,7 @@ function quoteReason(reason: string | null): string | null {
 }
 
 function hasMemoryCue(reason: string): boolean {
-  return /覚えて|知って|前に|昨日|条文|数字|3か月|3ヶ月|4分の3|過半数/.test(reason);
-}
-
-function hasConditionCue(reason: string): boolean {
-  return /条件|ただし|場合|とき|要件|例外|知った時|範囲/.test(reason);
-}
-
-function isReasonDetailed(reason: string): boolean {
-  return reason.trim().length >= 22;
-}
-
-function isReasonShort(reason: string): boolean {
-  const length = reason.trim().length;
-  return length > 0 && length < 14;
+  return /覚えて|知って|条文|数字|3か月|3ヶ月|4分の3|過半数/.test(reason);
 }
 
 function findPreviousQuestionObservation(
@@ -87,106 +74,58 @@ function findRecentRelatedObservation(
   return null;
 }
 
-function isImproving(
-  observation: ObservationEvent,
-  previousObservation: ObservationEvent | null
-): boolean {
-  if (!previousObservation) {
-    return false;
-  }
-
-  const confidenceImproved =
-    typeof observation.confidence === "number" &&
-    typeof previousObservation.confidence === "number" &&
-    observation.confidence > previousObservation.confidence;
-  const becameCorrect =
-    previousObservation.correct_or_wrong !== "correct" && observation.correct_or_wrong === "correct";
-  const movedTowardExplanation =
-    (previousObservation.reasoning_style === "memory_based" || previousObservation.reasoning_style === "uncertainty") &&
-    observation.reasoning_style === "condition_based";
-  const reasonGotLonger =
-    (observation.learner_reason?.trim().length ?? 0) > (previousObservation.learner_reason?.trim().length ?? 0);
-
-  return confidenceImproved || becameCorrect || movedTowardExplanation || reasonGotLonger;
-}
-
-function buildReadingTurn(
-  observation: ObservationEvent,
-  previousInQuestion: ObservationEvent | null
-): TurnDraft {
-  if (observation.correct_or_wrong === "correct" && observation.reasoning_style === "condition_based") {
-    return { speaker: "reading", dialogueMove: "observe", text: "今回は条件句まで読めていますね。" };
-  }
-
+function buildReadingTurn(observation: ObservationEvent): TurnDraft {
   if (observation.misunderstanding_type === "condition_omission") {
-    return {
-      speaker: "reading",
-      dialogueMove: "observe",
-      text: previousInQuestion ? "さっきより読めていますが、条件で少し迷いましたね。" : "条件のところで少し止まりましたね。"
-    };
+    return { speaker: "reading", dialogueMove: "observe", text: "条件句には触れていますが、少し迷いがあるようです。" };
   }
 
   if (observation.misunderstanding_type === "starting_point_confusion") {
-    return { speaker: "reading", dialogueMove: "observe", text: "数字は見ていますが、起点はまだ曖昧ですね。" };
+    return { speaker: "reading", dialogueMove: "observe", text: "数字には触れていますが、起点はまだ曖昧かもしれません。" };
+  }
+
+  if (observation.reasoning_style === "condition_based") {
+    return {
+      speaker: "reading",
+      dialogueMove: "observe",
+      text: observation.correct_or_wrong === "correct" ? "今回は条件句まで読めていますね。" : "条件句を根拠にしようとはしていますね。"
+    };
   }
 
   if (observation.reasoning_style === "memory_based") {
-    return { speaker: "reading", dialogueMove: "observe", text: "数字が先に目に入っていたようですね。" };
+    return { speaker: "reading", dialogueMove: "observe", text: "今回は数字を根拠にしているようです。" };
   }
 
   if (observation.reasoning_style === "uncertainty") {
-    return { speaker: "reading", dialogueMove: "observe", text: "選択肢で少し迷っていましたね。" };
+    return { speaker: "reading", dialogueMove: "observe", text: "今回は選択肢で迷いが見えますね。" };
   }
 
-  if (observation.correct_or_wrong === "correct") {
-    return { speaker: "reading", dialogueMove: "observe", text: "今回は迷いが少なかったですね。" };
-  }
-
-  return { speaker: "reading", dialogueMove: "observe", text: "印象で先に決めたかもしれませんね。" };
+  return { speaker: "reading", dialogueMove: "observe", text: "今回は判断がやや先に立ったようです。" };
 }
 
 function buildMemoryTurn(observation: ObservationEvent): TurnDraft {
-  const reasonQuote = quoteReason(observation.learner_reason);
   const reason = (observation.learner_reason ?? "").trim();
+  const reasonQuote = quoteReason(reason);
 
   if (!reason) {
-    return {
-      speaker: "memory",
-      dialogueMove: "defer",
-      text: "理由をまだ言葉にしていないので、考え方をもう少し聞きたいです。"
-    };
+    return { speaker: "memory", dialogueMove: "defer", text: "今回は理由の入力がありません。" };
   }
 
   if (hasMemoryCue(reason)) {
     return {
       speaker: "memory",
       dialogueMove: "observe",
-      text: reasonQuote
-        ? `${reasonQuote}と言っていますね。前の問題を思い出した可能性があります。`
-        : "前の記憶を使って判断した可能性があります。"
+      text: reasonQuote ? `今回は${reasonQuote}を理由にしています。` : "今回は記憶ベースの理由に見えます。"
     };
   }
 
-  if (isReasonDetailed(reason) || hasConditionCue(reason)) {
-    return {
-      speaker: "memory",
-      dialogueMove: "extend",
-      text: "理由が少し具体的です。自分の言葉で考えられていますね。"
-    };
-  }
-
-  if (isReasonShort(reason)) {
-    return {
-      speaker: "memory",
-      dialogueMove: "observe",
-      text: "理由は短めですが、答え方の癖は見えていますね。"
-    };
+  if (reason.length >= 22) {
+    return { speaker: "memory", dialogueMove: "extend", text: "今回は理由が前より具体的です。" };
   }
 
   return {
     speaker: "memory",
     dialogueMove: "observe",
-    text: reasonQuote ? `${reasonQuote}と話していますね。` : "理由は出ていますね。"
+    text: reasonQuote ? `理由は${reasonQuote}です。` : "今回は短い理由で答えています。"
   };
 }
 
@@ -195,30 +134,42 @@ function buildPatternTurn(
   previousInQuestion: ObservationEvent | null,
   relatedObservation: ObservationEvent | null
 ): TurnDraft {
-  if (!relatedObservation) {
-    return { speaker: "pattern", dialogueMove: "recall", text: "今日はこの迷い方が初めてですね。" };
+  if (previousInQuestion?.learner_reason && observation.learner_reason) {
+    const previousLength = previousInQuestion.learner_reason.trim().length;
+    const currentLength = observation.learner_reason.trim().length;
+
+    if (currentLength > previousLength) {
+      return { speaker: "pattern", dialogueMove: "update_hypothesis", text: "前の肢より理由が具体的です。" };
+    }
+
+    if (currentLength < previousLength) {
+      return { speaker: "pattern", dialogueMove: "recall", text: "前の肢より理由は短くなっています。" };
+    }
   }
 
   if (
+    previousInQuestion &&
+    previousInQuestion.reasoning_style &&
+    previousInQuestion.reasoning_style === observation.reasoning_style
+  ) {
+    if (observation.reasoning_style === "memory_based") {
+      return { speaker: "pattern", dialogueMove: "recall", text: "前の肢でも数字を根拠にしていました。" };
+    }
+
+    if (observation.reasoning_style === "condition_based") {
+      return { speaker: "pattern", dialogueMove: "recall", text: "前の肢でも条件を根拠にしていました。" };
+    }
+  }
+
+  if (
+    relatedObservation &&
     relatedObservation.misunderstanding_type === observation.misunderstanding_type &&
     observation.misunderstanding_type !== "unknown"
   ) {
-    return { speaker: "pattern", dialogueMove: "recall", text: "前の肢でも同じ迷い方でした。" };
+    return { speaker: "pattern", dialogueMove: "recall", text: "今回も同じ観察が続いています。" };
   }
 
-  if (isImproving(observation, previousInQuestion ?? relatedObservation)) {
-    return { speaker: "pattern", dialogueMove: "update_hypothesis", text: "前回より理由が少し具体的です。" };
-  }
-
-  if (relatedObservation.reasoning_style === observation.reasoning_style) {
-    return { speaker: "pattern", dialogueMove: "recall", text: "ここ2問は考え方の型が似ていますね。" };
-  }
-
-  if (previousInQuestion && previousInQuestion.correct_or_wrong !== observation.correct_or_wrong) {
-    return { speaker: "pattern", dialogueMove: "update_hypothesis", text: "前の肢とは違う見方ができていますね。" };
-  }
-
-  return { speaker: "pattern", dialogueMove: "update_hypothesis", text: "少しずつ見方が変わってきていますね。" };
+  return { speaker: "pattern", dialogueMove: "defer", text: "もう少しObservationを見ていきたいですね。" };
 }
 
 function buildLawTurn(
@@ -226,82 +177,27 @@ function buildLawTurn(
   previousInQuestion: ObservationEvent | null,
   relatedObservation: ObservationEvent | null
 ): TurnDraft {
-  const repeatedSameConfusion =
-    relatedObservation?.misunderstanding_type === observation.misunderstanding_type &&
-    observation.misunderstanding_type !== "unknown";
-  const repeatedReasoningStyle = relatedObservation?.reasoning_style === observation.reasoning_style;
-  const noReason = !(observation.learner_reason ?? "").trim();
-
-  if (repeatedSameConfusion && observation.misunderstanding_type === "starting_point_confusion") {
-    return {
-      speaker: "law",
-      dialogueMove: "extend",
-      text: "なら次は、いつから数えるのかを言わせたいです。"
-    };
+  if (observation.misunderstanding_type === "starting_point_confusion") {
+    return { speaker: "law", dialogueMove: "extend", text: "起算点の見方は今日のReviewで確認したいですね。" };
   }
 
-  if (repeatedSameConfusion && observation.misunderstanding_type === "condition_omission") {
-    return {
-      speaker: "law",
-      dialogueMove: "extend",
-      text: "なら次は例外より先に、条件を言い直してもらいたいです。"
-    };
+  if (observation.misunderstanding_type === "condition_omission") {
+    return { speaker: "law", dialogueMove: "extend", text: "条件の拾い方はTomorrow Planに残してもよさそうです。" };
   }
 
   if (
-    observation.correct_or_wrong === "correct" &&
     observation.reasoning_style === "condition_based" &&
-    (repeatedReasoningStyle || previousInQuestion?.correct_or_wrong === "correct")
+    observation.correct_or_wrong === "correct" &&
+    (previousInQuestion?.correct_or_wrong === "correct" || relatedObservation?.correct_or_wrong === "correct")
   ) {
-    return {
-      speaker: "law",
-      dialogueMove: "agree",
-      text: "それなら次は例外問題を混ぜてもよさそうです。"
-    };
-  }
-
-  if (noReason || observation.reasoning_style === "uncertainty") {
-    return {
-      speaker: "law",
-      dialogueMove: "defer",
-      text: "今日はここで一度ゆっくり説明させてもよさそうです。"
-    };
+    return { speaker: "law", dialogueMove: "agree", text: "この理解はReviewで定着を見てもよさそうです。" };
   }
 
   if (observation.reasoning_style === "memory_based") {
-    return {
-      speaker: "law",
-      dialogueMove: "extend",
-      text: "次は数字だけでなく、根拠の言葉も出してもらいたいです。"
-    };
+    return { speaker: "law", dialogueMove: "extend", text: "数字に寄った判断としてObservationを続けたいですね。" };
   }
 
-  return {
-    speaker: "law",
-    dialogueMove: "extend",
-    text: "もう一度だけ理由を言わせると、理解の深さが見えそうです。"
-  };
-}
-
-function buildTurnSequence(
-  observation: ObservationEvent,
-  previousInQuestion: ObservationEvent | null,
-  relatedObservation: ObservationEvent | null
-): TurnDraft[] {
-  const readingTurn = buildReadingTurn(observation, previousInQuestion);
-  const memoryTurn = buildMemoryTurn(observation);
-  const patternTurn = buildPatternTurn(observation, previousInQuestion, relatedObservation);
-  const lawTurn = buildLawTurn(observation, previousInQuestion, relatedObservation);
-
-  if (relatedObservation) {
-    return [readingTurn, patternTurn, memoryTurn, lawTurn];
-  }
-
-  if (!(observation.learner_reason ?? "").trim()) {
-    return [readingTurn, memoryTurn, lawTurn, patternTurn];
-  }
-
-  return [readingTurn, memoryTurn, patternTurn, lawTurn];
+  return { speaker: "law", dialogueMove: "defer", text: "この観察はReview候補として残せそうです。" };
 }
 
 function buildTurnsForObservation(
@@ -311,7 +207,12 @@ function buildTurnsForObservation(
   const observation = observations[currentIndex];
   const previousInQuestion = findPreviousQuestionObservation(observations, currentIndex);
   const relatedObservation = findRecentRelatedObservation(observations, currentIndex);
-  const turns = buildTurnSequence(observation, previousInQuestion, relatedObservation);
+  const turns: TurnDraft[] = [
+    buildReadingTurn(observation),
+    buildMemoryTurn(observation),
+    buildPatternTurn(observation, previousInQuestion, relatedObservation),
+    buildLawTurn(observation, previousInQuestion, relatedObservation)
+  ];
 
   return turns.map((turn, index) => ({
     id: `${observation.id}-${turn.speaker}-${turn.dialogueMove}-${index}`,
