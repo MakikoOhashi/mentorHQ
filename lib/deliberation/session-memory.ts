@@ -320,6 +320,7 @@ function toSerializableObservationEvent(snapshot: QueryDocumentSnapshot): Observ
     question_index: data.question_index,
     statement_index: typeof data.statement_index === "number" ? data.statement_index : null,
     learner_choice: data.learner_choice === "correct" || data.learner_choice === "incorrect" ? data.learner_choice : null,
+    correct_or_wrong: data.correct_or_wrong === "correct" || data.correct_or_wrong === "wrong" ? data.correct_or_wrong : null,
     learner_reason: typeof data.learner_reason === "string" ? data.learner_reason : null,
     reasoning_style:
       data.reasoning_style === "memory_based" ||
@@ -331,6 +332,7 @@ function toSerializableObservationEvent(snapshot: QueryDocumentSnapshot): Observ
     intervention_type: data.intervention_type,
     misunderstanding_type: data.misunderstanding_type,
     confidence: typeof data.confidence === "number" ? data.confidence : null,
+    observation_note: typeof data.observation_note === "string" ? data.observation_note : data.note,
     note: data.note,
     created_at: toSerializableCreatedAt(data.created_at)
   };
@@ -850,11 +852,13 @@ async function createObservationEvent(observation: ObservationEventInput): Promi
     question_index: observation.question_index,
     statement_index: observation.statement_index ?? null,
     learner_choice: observation.learner_choice ?? null,
+    correct_or_wrong: observation.correct_or_wrong ?? null,
     learner_reason: observation.learner_reason ?? null,
     reasoning_style: observation.reasoning_style ?? null,
     intervention_type: observation.intervention_type,
     misunderstanding_type: observation.misunderstanding_type,
     confidence: observation.confidence,
+    observation_note: observation.observation_note ?? observation.note,
     note: observation.note,
     created_at: new Date().toISOString()
   };
@@ -870,11 +874,13 @@ async function createObservationEvent(observation: ObservationEventInput): Promi
       question_index: observation.question_index,
       statement_index: observation.statement_index ?? null,
       learner_choice: observation.learner_choice ?? null,
+      correct_or_wrong: observation.correct_or_wrong ?? null,
       learner_reason: observation.learner_reason ?? null,
       reasoning_style: observation.reasoning_style ?? null,
       intervention_type: observation.intervention_type,
       misunderstanding_type: observation.misunderstanding_type,
       confidence: observation.confidence,
+      observation_note: observation.observation_note ?? observation.note,
       note: observation.note,
       created_at: FieldValue.serverTimestamp()
     });

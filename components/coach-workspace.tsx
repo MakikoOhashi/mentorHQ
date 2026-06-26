@@ -41,6 +41,7 @@ type QuestionPhase = "stem" | "statement" | "final" | "result";
 type StatementFeedback = {
   title: string;
   message: string;
+  severity: "good" | "caution";
 };
 
 type FinalResult = {
@@ -74,16 +75,17 @@ const STATEMENT_OPTIONS: Array<{ label: string; value: StatementChoice }> = [
   { label: "× 誤り", value: "incorrect" }
 ];
 
-const FEEDBACK_BY_CHOICE: Record<StatementChoice, StatementFeedback> = {
-  correct: {
-    title: "なるほど。",
-    message: "その見方を、短く言葉にして残してください。"
-  },
-  incorrect: {
-    title: "ありがとうございます。",
-    message: "どこが気になったのかを1〜2行で残してください。"
-  }
-};
+const POSITIVE_FEEDBACKS: StatementFeedback[] = [
+  { title: "その判断で合っています。", message: "ここは正しく読めています。", severity: "good" },
+  { title: "ここは正しく読めています。", message: "この条文は押さえられていますね。", severity: "good" },
+  { title: "この条文は押さえられていますね。", message: "そのまま短く理由を残してください。", severity: "good" }
+];
+
+const CORRECTIVE_FEEDBACKS: StatementFeedback[] = [
+  { title: "惜しいです。", message: "ここは起算点がポイントです。", severity: "caution" },
+  { title: "惜しいです。", message: "条件句をもう一度見てみましょう。", severity: "caution" },
+  { title: "ここは一度立ち止まりましょう。", message: "数字だけでは判断できません。", severity: "caution" }
+];
 
 function getObservationIcon(observation: ObservationEvent) {
   if (observation.reasoning_style === "memory_based") return "🧠";
@@ -142,6 +144,19 @@ function formatReasoningStyle(reasoningStyle: ObservationEvent["reasoning_style"
   if (reasoningStyle === "intuition") return "intuition";
   if (reasoningStyle === "uncertainty") return "uncertainty";
   return "unclassified";
+}
+
+function formatCorrectness(correctness: ObservationEvent["correct_or_wrong"]) {
+  if (correctness === "correct") return "correct";
+  if (correctness === "wrong") return "wrong";
+  return "pending";
+}
+
+function getImmediateFeedback(statement: LearnerCase["statements"][number], choice: StatementChoice): StatementFeedback {
+  const learnerMarkedCorrect = choice === "correct";
+  const isRight = learnerMarkedCorrect === statement.isCorrect;
+  const source = isRight ? POSITIVE_FEEDBACKS : CORRECTIVE_FEEDBACKS;
+  return source[(statement.id.length + (choice === "correct" ? 1 : 0)) % source.length];
 }
 
 function getQuestionPhaseFromObservations(learnerCase: LearnerCase | null, questionObservations: ObservationEvent[]): QuestionPhase {
@@ -498,6 +513,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const currentStatement = learnerCase.statements[currentStatementIndex] ?? null;
   const nextResultLabel =
     queuedNextPayload?.session.status === "completed" ? "今日のふりかえりへ" : "次の問題へ";
+  const immediateFeedback = currentStatement && statementChoice ? getImmediateFeedback(currentStatement, statementChoice) : null;
 
   return (
     <main className="demo-viewport">
@@ -645,10 +661,10 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                         ))}
                       </div>
                       {statementChoice ? (
-                        <section className="feedback-card feedback-card--caution">
+                        <section className={`feedback-card feedback-card--${immediateFeedback?.severity ?? "caution"}`}>
                           <span className="feedback-eyebrow">Immediate Coach Feedback</span>
-                          <h4>{FEEDBACK_BY_CHOICE[statementChoice].title}</h4>
-                          <p>{FEEDBACK_BY_CHOICE[statementChoice].message}</p>
+                          <h4>{immediateFeedback?.title}</h4>
+                          <p>{immediateFeedback?.message}</p>
                           <label className="reason-label" htmlFor="statement-reason">
                             なぜそう思いましたか？
                           </label>
@@ -716,7 +732,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                         <span className="feedback-eyebrow">Final Feedback</span>
                         <h4>正解は {finalResult.correctIndex} です。</h4>
                         <p>
-                          あなたの最終回答は {finalResult.selectedIndex} でした。各肢の見方を下で整理します。
+                          あなたの最終回答は {finalResult.selectedIndex} でした。ここまで各肢を確認してきたので、最後にもう一度整理します。
                         </p>
                       </section>
                       <div className="result-explanation-list">
@@ -724,7 +740,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                           <section className="result-explanation-card" key={statement.id}>
                             <div className="result-explanation-head">
                               <span>肢{index + 1}</span>
-                              <strong>{statement.isCorrect ? "正しい" : "誤り"}</strong>
+                              <strong>{statement.isCorrect ? "○" : "×"}</strong>
                             </div>
                             <p>{statement.explanation}</p>
                           </section>
@@ -909,7 +925,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                     <p className="latest-observation-note">{latestObservation.note}</p>
                     <p className="latest-observation-meta">
                       肢{latestObservation.statement_index ?? "-"} / {formatChoiceLabel(latestObservation.learner_choice)} /{" "}
-                      {formatReasoningStyle(latestObservation.reasoning_style)}
+                      {formatCorrectness(latestObservation.correct_or_wrong)} / {formatReasoningStyle(latestObservation.reasoning_style)}
                     </p>
                   </div>
                 </div>
@@ -942,6 +958,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                           <div className="observation-meta-row">
                             <span>肢{observation.statement_index ?? "-"}</span>
                             <span>{formatChoiceLabel(observation.learner_choice)}</span>
+                            <span>{formatCorrectness(observation.correct_or_wrong)}</span>
                             <span>{formatReasoningStyle(observation.reasoning_style)}</span>
                           </div>
                         </div>

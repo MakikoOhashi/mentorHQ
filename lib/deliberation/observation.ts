@@ -1,6 +1,7 @@
 import type {
   CoachDecision,
   DeliberationEvent,
+  ObservationCorrectness,
   ObservationEventInput,
   ObservationMisunderstandingType,
   QuestionStatement,
@@ -152,24 +153,36 @@ function getReasoningIntervention(reasoningStyle: ReasoningStyle) {
   }
 }
 
-function buildStatementObservationNote(statementIndex: number, reasoningStyle: ReasoningStyle, reason: string): string {
+function detectStatementCorrectness(statement: QuestionStatement, learnerChoice: StatementChoice): ObservationCorrectness {
+  const learnerMarkedCorrect = learnerChoice === "correct";
+  return learnerMarkedCorrect === statement.isCorrect ? "correct" : "wrong";
+}
+
+function buildStatementObservationNote(
+  statementIndex: number,
+  reasoningStyle: ReasoningStyle,
+  reason: string,
+  correctness: ObservationCorrectness
+): string {
+  const correctnessPrefix = correctness === "correct" ? "判断は合っています。" : "判断は外れています。";
+
   if (reasoningStyle === "memory_based") {
-    return `肢${statementIndex}は暗記ベースで判断しています。`;
+    return `${correctnessPrefix} 肢${statementIndex}は暗記ベースで判断しています。`;
   }
 
   if (reasoningStyle === "condition_based") {
-    return `肢${statementIndex}は条件句や要件を根拠に見ています。`;
+    return `${correctnessPrefix} 肢${statementIndex}は条件句や要件を根拠に見ています。`;
   }
 
   if (reasoningStyle === "intuition") {
-    return `肢${statementIndex}は直感寄りに判断しています。`;
+    return `${correctnessPrefix} 肢${statementIndex}は直感寄りに判断しています。`;
   }
 
   if (reason.trim().length <= 14) {
-    return "理由説明が短く、確信は高くなさそうです。";
+    return `${correctnessPrefix} 理由説明が短く、確信は高くなさそうです。`;
   }
 
-  return `肢${statementIndex}は迷いを残しながら判断しています。`;
+  return `${correctnessPrefix} 肢${statementIndex}は迷いを残しながら判断しています。`;
 }
 
 function detectStatementConfidence(reasoningStyle: ReasoningStyle, reason: string): number {
@@ -200,6 +213,13 @@ export function buildStatementObservationInput(params: {
 }): ObservationEventInput {
   const reasoningStyle = detectReasoningStyle(params.learnerReason);
   const misunderstandingType = getReasoningMisunderstandingType(reasoningStyle);
+  const correctness = detectStatementCorrectness(params.statement, params.learnerChoice);
+  const observationNote = buildStatementObservationNote(
+    params.statementIndex,
+    reasoningStyle,
+    params.learnerReason,
+    correctness
+  );
 
   return {
     daily_session_id: params.dailySessionId,
@@ -207,11 +227,13 @@ export function buildStatementObservationInput(params: {
     question_index: params.questionIndex,
     statement_index: params.statementIndex,
     learner_choice: params.learnerChoice,
+    correct_or_wrong: correctness,
     learner_reason: params.learnerReason.trim(),
     reasoning_style: reasoningStyle,
     intervention_type: getReasoningIntervention(reasoningStyle),
     misunderstanding_type: misunderstandingType,
     confidence: detectStatementConfidence(reasoningStyle, params.learnerReason),
-    note: buildStatementObservationNote(params.statementIndex, reasoningStyle, params.learnerReason)
+    observation_note: observationNote,
+    note: observationNote
   };
 }

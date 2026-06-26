@@ -135,6 +135,10 @@ export const STATEMENT_CHOICES = ["correct", "incorrect"] as const;
 
 export type StatementChoice = (typeof STATEMENT_CHOICES)[number];
 
+export const OBSERVATION_CORRECTNESS = ["correct", "wrong"] as const;
+
+export type ObservationCorrectness = (typeof OBSERVATION_CORRECTNESS)[number];
+
 export type ObservationEvent = {
   id: string;
   daily_session_id: string;
@@ -142,11 +146,13 @@ export type ObservationEvent = {
   question_index: number;
   statement_index: number | null;
   learner_choice: StatementChoice | null;
+  correct_or_wrong: ObservationCorrectness | null;
   learner_reason: string | null;
   reasoning_style: ReasoningStyle | null;
   intervention_type: SelectedIntervention;
   misunderstanding_type: ObservationMisunderstandingType;
   confidence: number | null;
+  observation_note: string;
   note: string;
   created_at: string | null;
 };
@@ -157,11 +163,13 @@ export type ObservationEventInput = {
   question_index: number;
   statement_index?: number | null;
   learner_choice?: StatementChoice | null;
+  correct_or_wrong?: ObservationCorrectness | null;
   learner_reason?: string | null;
   reasoning_style?: ReasoningStyle | null;
   intervention_type: SelectedIntervention;
   misunderstanding_type: ObservationMisunderstandingType;
   confidence: number | null;
+  observation_note?: string;
   note: string;
 };
 
