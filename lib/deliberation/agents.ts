@@ -4,41 +4,41 @@ export const AGENTS: AgentDefinition[] = [
   {
     id: "reading",
     name: "Reading Coach",
-    role: "問題文の読み方のずれを拾う",
-    scope: ["条件句", "語尾", "起算点", "読み飛ばし", "問題文の解釈"],
+    role: "学習者がどこを読めていて、どこで止まったかを見る",
+    scope: ["条件句", "語尾", "起算点", "読み飛ばし", "読む順番の癖"],
     allowedDialogueMoves: ["observe", "agree", "challenge", "extend", "update_hypothesis"],
     systemPrompt:
-      "担当は読み方のずれだけです。前の発言を受けて、必要に応じて observe / agree / challenge / extend / update_hypothesis を選んで短く話す。",
+      "担当は『この学習者が今どう読んでいるか』です。問題説明ではなく、学習者の読み方の変化や迷い方を短く自然に話してください。",
     outputSchema: ["message", "hypothesis", "dialogue_move", "confidence", "influenced_by"]
   },
   {
     id: "law",
     name: "Law Coach",
-    role: "条文要件と法的効果のずれを拾う",
+    role: "学習者の制度理解が次にどこまで進めそうかを見る",
     scope: ["条文要件", "制度理解", "手続要件", "法的効果", "例外条件"],
     allowedDialogueMoves: ["observe", "agree", "challenge", "extend", "update_hypothesis"],
     systemPrompt:
-      "担当は法律面だけです。固定の賛否キャラにせず、前の発言を受けて条文要件や法的効果の観点から短く返す。",
+      "担当は法律面から『次にどう伸ばすか』を考えることです。論点名だけで終わらず、次に試す問いや確認したい理解を短く返してください。",
     outputSchema: ["message", "hypothesis", "dialogue_move", "confidence", "influenced_by"]
   },
   {
     id: "memory",
     name: "Memory Coach",
-    role: "暗記寄りか理解寄りかを切り分ける",
+    role: "学習者が記憶で答えているか、自分の言葉で考え始めているかを見る",
     scope: ["暗記ベースか理解ベースか", "理由が再現可能か", "根拠の弱さ", "知識の断片化"],
     allowedDialogueMoves: ["observe", "agree", "challenge", "extend", "defer"],
     systemPrompt:
-      "担当は記憶依存と根拠の再現性です。『知ってた』『なんとなく』の弱さを拾い、前の発言を受けて短く自然に話す。",
+      "担当は記憶依存と根拠の再現性です。学習者の言い方や理由の変化を拾い、『この学習者は何を頼りに答えたか』を短く自然に話してください。",
     outputSchema: ["message", "hypothesis", "dialogue_move", "confidence", "influenced_by"]
   },
   {
     id: "pattern",
     name: "Pattern Coach",
-    role: "同じ日の中の繰り返しをつなぐ",
-    scope: ["過去の似た問題", "以前も出た誤解", "今日の中で繰り返している傾向", "similar issue / repeated pattern"],
+    role: "同じ日の中で学習者の変化と繰り返しをつなぐ",
+    scope: ["過去の似た問題", "以前も出た誤解", "今日の中で繰り返している傾向", "前回より良くなった点"],
     allowedDialogueMoves: ["observe", "extend", "recall", "update_hypothesis", "defer"],
     systemPrompt:
-      "担当は近い observation 同士のつながりだけです。本格検索はせず、直近の繰り返しが見えたときだけ recall を使う。",
+      "担当は近い observation 同士のつながりだけです。問題の説明ではなく、前回との差分や同じ迷い方が見えたときに短くつないでください。",
     outputSchema: ["message", "hypothesis", "dialogue_move", "confidence", "influenced_by"]
   },
   {
