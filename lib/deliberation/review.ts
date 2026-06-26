@@ -63,8 +63,18 @@ function buildPatternSummaries(observations: ObservationEvent[]): string[] {
   const conditionCount = observations.filter((observation) => observation.reasoning_style === "condition_based").length;
   const intuitionCount = observations.filter((observation) => observation.reasoning_style === "intuition").length;
   const uncertaintyCount = observations.filter((observation) => observation.reasoning_style === "uncertainty").length;
+  const correctCount = observations.filter((observation) => observation.correct_or_wrong === "correct").length;
+  const wrongCount = observations.filter((observation) => observation.correct_or_wrong === "wrong").length;
 
   const patterns: string[] = [];
+
+  if (correctCount > 0) {
+    patterns.push(`正しく判断できた肢が ${correctCount} 件ありました。`);
+  }
+
+  if (wrongCount > 0) {
+    patterns.push(`見直し候補の肢が ${wrongCount} 件ありました。`);
+  }
 
   if (memoryCount > 0) {
     patterns.push(`数字や記憶を根拠に置く場面が ${memoryCount} 回ありました。`);
@@ -82,10 +92,24 @@ function buildPatternSummaries(observations: ObservationEvent[]): string[] {
     patterns.push(`迷いを残した判断が ${uncertaintyCount} 回ありました。`);
   }
 
-  return patterns.slice(0, 3);
+  return patterns.slice(0, 4);
 }
 
-function buildCoachComment(repeatedObservation: ObservationEvent["misunderstanding_type"] | "unknown"): string {
+function buildCoachComment(
+  repeatedObservation: ObservationEvent["misunderstanding_type"] | "unknown",
+  observations: ObservationEvent[]
+): string {
+  const correctCount = observations.filter((observation) => observation.correct_or_wrong === "correct").length;
+  const wrongCount = observations.filter((observation) => observation.correct_or_wrong === "wrong").length;
+
+  if (correctCount > 0 && correctCount >= wrongCount) {
+    if (repeatedObservation === "condition_based_judgment") {
+      return "今日は条件句を拾って正しく判断できる場面が多く見えました。この流れは安定材料として扱えそうです。";
+    }
+
+    return "今日は正しく判断できている肢が先に見えました。理由が短い箇所だけ軽く補いながら、この再現性を保ちます。";
+  }
+
   if (repeatedObservation === "memory_based_judgment") {
     return "今日は数字や記憶から先に入る傾向が見えました。明日は条件句まで口に出してから結論へ進む流れを見ます。";
   }
@@ -129,6 +153,6 @@ export function buildDailyReviewInput(params: {
       patternSummaries.length > 0
         ? patternSummaries
         : ["判断根拠の置き方はまだ一定していないため、次回も同じ観点で観察します。"],
-    coach_comment: buildCoachComment(repeatedObservation)
+    coach_comment: buildCoachComment(repeatedObservation, observations)
   };
 }

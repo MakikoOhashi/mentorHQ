@@ -170,25 +170,36 @@ function buildStatementObservationNote(
   reason: string,
   correctness: ObservationCorrectness
 ): string {
-  const correctnessPrefix = correctness === "correct" ? "判断は合っています。" : "判断は外れています。";
+  const isCorrect = correctness === "correct";
+  const correctnessPrefix = isCorrect ? "判断は合っています。" : "判断は外れています。";
 
   if (reasoningStyle === "memory_based") {
-    return `${correctnessPrefix} 肢${statementIndex}は暗記ベースで判断しています。`;
+    return isCorrect
+      ? `${correctnessPrefix} 肢${statementIndex}は知識を使って正しく判断できています。`
+      : `${correctnessPrefix} 肢${statementIndex}は暗記ベースで判断しています。`;
   }
 
   if (reasoningStyle === "condition_based") {
-    return `${correctnessPrefix} 肢${statementIndex}は条件句や要件を根拠に見ています。`;
+    return isCorrect
+      ? `${correctnessPrefix} 肢${statementIndex}は条件句や要件を根拠に見られています。`
+      : `${correctnessPrefix} 肢${statementIndex}は条件句や要件を根拠に見ています。`;
   }
 
   if (reasoningStyle === "intuition") {
-    return `${correctnessPrefix} 肢${statementIndex}は直感寄りに判断しています。`;
+    return isCorrect
+      ? `${correctnessPrefix} 肢${statementIndex}は短い判断でも外していません。`
+      : `${correctnessPrefix} 肢${statementIndex}は直感寄りに判断しています。`;
   }
 
   if (reason.trim().length <= 14) {
-    return `${correctnessPrefix} 理由説明が短く、確信は高くなさそうです。`;
+    return isCorrect
+      ? `${correctnessPrefix} 理由はまだ短いですが、判断自体はできています。`
+      : `${correctnessPrefix} 理由説明が短く、確認が足りていません。`;
   }
 
-  return `${correctnessPrefix} 肢${statementIndex}は迷いを残しながら判断しています。`;
+  return isCorrect
+    ? `${correctnessPrefix} 肢${statementIndex}は理由を添えて判断できています。`
+    : `${correctnessPrefix} 肢${statementIndex}は迷いを残しながら判断しています。`;
 }
 
 function detectStatementConfidence(reasoningStyle: ReasoningStyle, reason: string): number {
