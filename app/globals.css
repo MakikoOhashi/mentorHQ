@@ -364,17 +364,25 @@ blockquote {
 .observation-stream-viewport {
   margin-top: 18px;
   padding: 10px;
-  min-height: 360px;
+  height: 520px;
+  overflow-y: auto;
+  overflow-x: hidden;
   border-radius: 22px;
   border: 1px solid rgba(233, 226, 211, 0.85);
   background:
     linear-gradient(180deg, rgba(248, 246, 239, 0.92), rgba(255, 255, 255, 0.82)),
     rgba(255, 255, 255, 0.78);
+  scroll-behavior: smooth;
 }
 
 .observation-list {
   display: grid;
   gap: 12px;
+}
+
+.coach-thought-list {
+  align-content: end;
+  min-height: 100%;
 }
 
 .observation-empty-state {
@@ -418,6 +426,29 @@ blockquote {
   border-radius: 18px 18px 18px 8px;
   border: 1px solid var(--border);
   background: #fffdfa;
+  transition:
+    opacity 260ms ease,
+    border-color 260ms ease,
+    box-shadow 260ms ease,
+    transform 260ms ease,
+    filter 260ms ease;
+}
+
+.thought-bubble {
+  background: linear-gradient(180deg, #fffef9, #ffffff);
+}
+
+.thought-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.thought-coach-name {
+  font-size: 0.84rem;
+  font-weight: 800;
+  color: #35567a;
 }
 
 .observation-meta-row {
@@ -438,6 +469,7 @@ blockquote {
   background: linear-gradient(180deg, #f5fbf6, #ffffff);
   border-color: #cae4d0;
   box-shadow: 0 16px 34px rgba(31, 119, 87, 0.1);
+  transform: translateY(-1px) scale(1.01);
 }
 
 .is-latest-observation .observation-icon {

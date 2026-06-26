@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { buildStatementObservationInput } from "@/lib/deliberation/observation";
 import type {
@@ -50,6 +50,15 @@ type FinalResult = {
   summary: string;
 };
 
+type CoachThought = {
+  id: string;
+  coachName: string;
+  icon: string;
+  text: string;
+  created_at: string | null;
+  source_observation_id: string;
+};
+
 const STEP_ORDER: LearnerStep[] = [
   "morning",
   "question-1",
@@ -86,13 +95,6 @@ const CORRECTIVE_FEEDBACKS: StatementFeedback[] = [
   { title: "惜しいです。", message: "条件句をもう一度見てみましょう。", severity: "caution" },
   { title: "ここは一度立ち止まりましょう。", message: "数字だけでは判断できません。", severity: "caution" }
 ];
-
-function getObservationIcon(observation: ObservationEvent) {
-  if (observation.reasoning_style === "memory_based") return "🧠";
-  if (observation.reasoning_style === "condition_based") return "🔁";
-  if (observation.reasoning_style === "uncertainty") return "💭";
-  return "📌";
-}
 
 function getCurrentStep(session: DailySession | null, tomorrowPlan: TomorrowPlan | null): LearnerStep {
   if (!session) {
@@ -132,26 +134,6 @@ function formatObservationTime(createdAt: string | null, index: number) {
   return `09:${String(index * 2 + 1).padStart(2, "0")}`;
 }
 
-function formatChoiceLabel(choice: ObservationEvent["learner_choice"]) {
-  if (choice === "correct") return "○";
-  if (choice === "incorrect") return "×";
-  return "未記録";
-}
-
-function formatReasoningStyle(reasoningStyle: ObservationEvent["reasoning_style"]) {
-  if (reasoningStyle === "memory_based") return "memory_based";
-  if (reasoningStyle === "condition_based") return "condition_based";
-  if (reasoningStyle === "intuition") return "intuition";
-  if (reasoningStyle === "uncertainty") return "uncertainty";
-  return "unclassified";
-}
-
-function formatCorrectness(correctness: ObservationEvent["correct_or_wrong"]) {
-  if (correctness === "correct") return "correct";
-  if (correctness === "wrong") return "wrong";
-  return "pending";
-}
-
 function getImmediateFeedback(statement: LearnerCase["statements"][number], choice: StatementChoice): StatementFeedback {
   const learnerMarkedCorrect = choice === "correct";
   const isRight = learnerMarkedCorrect === statement.isCorrect;
@@ -175,6 +157,129 @@ function getQuestionPhaseFromObservations(learnerCase: LearnerCase | null, quest
   return "final";
 }
 
+function buildReasonObservation(reason: string | null) {
+  const trimmed = reason?.trim();
+  if (!trimmed) {
+    return "理由はまだ短めです。次の肢でも同じ迷い方か見ます。";
+  }
+
+  if (trimmed.length <= 14) {
+    return "理由は短めです。根拠が言葉になるかを見たいです。";
+  }
+
+  return `「${trimmed}」という見方をしています。`;
+}
+
+function buildReadingThought(observation: ObservationEvent): string {
+  if (observation.reasoning_style === "condition_based") {
+    return "条件句には目が向いています。起点のズレがないかだけ見ます。";
+  }
+
+  if (observation.reasoning_style === "memory_based") {
+    return "数字や語句が先に立っています。前提条件まで拾えているか見たいです。";
+  }
+
+  if (observation.reasoning_style === "uncertainty") {
+    return "まだ読みの軸が定まっていません。条件句に戻す余地があります。";
+  }
+
+  return "まず印象で入っています。次の一文で読み直しが入るか見ます。";
+}
+
+function buildLawThought(observation: ObservationEvent): string {
+  if (observation.correct_or_wrong === "wrong" && observation.reasoning_style === "condition_based") {
+    return "要件を追っていますが、決め手にした条件が少しずれていそうです。";
+  }
+
+  if (observation.correct_or_wrong === "wrong" && observation.reasoning_style === "memory_based") {
+    return "知識はありますが、条文の当てはめがまだ浅いかもしれません。";
+  }
+
+  if (observation.correct_or_wrong === "correct") {
+    return "この肢は制度理解で支えられています。この調子で理由を揃えたいです。";
+  }
+
+  return "ここはまだ保留です。次の肢でも同じ判断軸が出るか見ます。";
+}
+
+function buildMemoryThought(observation: ObservationEvent): string {
+  if (observation.reasoning_style === "memory_based") {
+    return "覚えている要素は出ています。根拠が単発暗記で止まらないか確認します。";
+  }
+
+  if (observation.reasoning_style === "condition_based") {
+    return "暗記より構造で見ています。再現できる説明になりそうです。";
+  }
+
+  if (observation.reasoning_style === "uncertainty") {
+    return "記憶の手がかりが弱そうです。言い切れない感触が残っています。";
+  }
+
+  return "まだ勘寄りです。理由があとから乗るかどうかを見ます。";
+}
+
+function buildReviewThought(observation: ObservationEvent): string {
+  if (observation.correct_or_wrong === "wrong") {
+    return "ここは今日のレビュー候補に残します。";
+  }
+
+  if (observation.reasoning_style === "uncertainty") {
+    return "正誤より迷い方をレビューで拾いたいです。";
+  }
+
+  return "まだ結論にはしません。次の肢まで流れを見ます。";
+}
+
+function buildCoachThoughtsForObservation(observation: ObservationEvent): CoachThought[] {
+  const thoughts: CoachThought[] = [
+    {
+      id: `${observation.id}-reading`,
+      coachName: "Reading Coach",
+      icon: "🧠",
+      text: buildReadingThought(observation),
+      created_at: observation.created_at,
+      source_observation_id: observation.id
+    },
+    {
+      id: `${observation.id}-law`,
+      coachName: "Law Coach",
+      icon: "🔎",
+      text: buildLawThought(observation),
+      created_at: observation.created_at,
+      source_observation_id: observation.id
+    },
+    {
+      id: `${observation.id}-memory`,
+      coachName: "Memory Coach",
+      icon: "💭",
+      text: buildMemoryThought(observation),
+      created_at: observation.created_at,
+      source_observation_id: observation.id
+    },
+    {
+      id: `${observation.id}-review`,
+      coachName: "Review Coach",
+      icon: "📌",
+      text: buildReviewThought(observation),
+      created_at: observation.created_at,
+      source_observation_id: observation.id
+    }
+  ];
+
+  if (observation.learner_reason?.trim()) {
+    thoughts.splice(2, 0, {
+      id: `${observation.id}-reason`,
+      coachName: "Reading Coach",
+      icon: "🫧",
+      text: buildReasonObservation(observation.learner_reason),
+      created_at: observation.created_at,
+      source_observation_id: observation.id
+    });
+  }
+
+  return thoughts.slice(0, 4);
+}
+
 export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const [learnerCase, setLearnerCase] = useState(initialCase);
   const [dailySession, setDailySession] = useState<DailySession | null>(null);
@@ -196,6 +301,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const [finalChoice, setFinalChoice] = useState<number | null>(null);
   const [finalResult, setFinalResult] = useState<FinalResult | null>(null);
   const [queuedNextPayload, setQueuedNextPayload] = useState<DailySessionPayload | null>(null);
+  const coachMindViewportRef = useRef<HTMLDivElement | null>(null);
 
   const applyDailySessionPayload = useCallback((payload: DailySessionPayload) => {
     setDailySession(payload.session);
@@ -270,6 +376,23 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     () => observations.filter((observation) => observation.question_id === currentQuestionId),
     [currentQuestionId, observations]
   );
+
+  const coachThoughts = useMemo(
+    () => observations.flatMap((observation) => buildCoachThoughtsForObservation(observation)),
+    [observations]
+  );
+
+  useEffect(() => {
+    const viewport = coachMindViewportRef.current;
+    if (!viewport) {
+      return;
+    }
+
+    viewport.scrollTo({
+      top: viewport.scrollHeight,
+      behavior: "smooth"
+    });
+  }, [coachThoughts]);
 
   useEffect(() => {
     if (!currentQuestionId || dailySession?.status === "completed" || queuedNextPayload || finalResult) {
@@ -903,68 +1026,51 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
             <div className="panel-heading tight observation-stream-heading">
               <div>
                 <span className="panel-kicker">AI Coach Mind</span>
-                <h3>まだ判断せず、観察だけを積みます</h3>
-                <p className="device-caption">{learnerCase.exam} / Statement-by-statement observation</p>
+                <h3>コーチたちが裏側で考え続けています</h3>
+                <p className="device-caption">結論は Daily Review まで出しません。</p>
               </div>
               <span className="observation-count-pill">
-                {dailySession ? `${observations.length} observations` : "0 observations"}
+                {dailySession ? `${coachThoughts.length} thoughts` : "0 thoughts"}
               </span>
             </div>
             <p className="observation-intro-copy">
-              ○×の結果ではなく、各肢で何を根拠にし、どこで迷ったかを記録しています。
+              各肢のたびに、複数のコーチが短い独り言を残しています。
             </p>
 
-            {latestObservation ? (
-              <section className="latest-observation-card">
-                <div className="latest-observation-label">Latest Observation</div>
-                <div className="latest-observation-row">
-                  <span className="observation-icon" aria-hidden="true">
-                    {getObservationIcon(latestObservation)}
-                  </span>
-                  <div>
-                    <p className="latest-observation-note">{latestObservation.note}</p>
-                    <p className="latest-observation-meta">
-                      肢{latestObservation.statement_index ?? "-"} / {formatChoiceLabel(latestObservation.learner_choice)} /{" "}
-                      {formatCorrectness(latestObservation.correct_or_wrong)} / {formatReasoningStyle(latestObservation.reasoning_style)}
-                    </p>
-                  </div>
-                </div>
-              </section>
-            ) : null}
-
-            <div className="observation-stream-viewport">
-              <div className="observation-list">
-                {observations.length === 0 ? (
+            <div className="observation-stream-viewport" ref={coachMindViewportRef}>
+              <div className="observation-list coach-thought-list">
+                {coachThoughts.length === 0 ? (
                   <div className="observation-empty-state">
-                    <p>まだ観察はありません。</p>
-                    <p>肢1から順に、右側へ静かに増えていきます。</p>
+                    <p>まだ thought はありません。</p>
+                    <p>肢ごとの回答後に、ここへ思考が流れ始めます。</p>
                   </div>
                 ) : (
-                  observations.map((observation, index) => (
-                    <section
-                      className={`mind-entry ${latestObservation?.id === observation.id ? "is-latest-observation" : ""}`}
-                      key={observation.id}
-                    >
-                      <div className="mind-entry-time">{formatObservationTime(observation.created_at, index)}</div>
-                      <div className="observation-row">
-                        <div className="observation-icon" aria-hidden="true">
-                          {getObservationIcon(observation)}
-                        </div>
-                        <div className="observation-bubble">
-                          <p>{observation.note}</p>
-                          {observation.learner_reason ? (
-                            <p className="observation-reason">理由: {observation.learner_reason}</p>
-                          ) : null}
-                          <div className="observation-meta-row">
-                            <span>肢{observation.statement_index ?? "-"}</span>
-                            <span>{formatChoiceLabel(observation.learner_choice)}</span>
-                            <span>{formatCorrectness(observation.correct_or_wrong)}</span>
-                            <span>{formatReasoningStyle(observation.reasoning_style)}</span>
+                  coachThoughts.map((thought, index) => {
+                    const isLatestThought =
+                      thought.source_observation_id === latestObservation?.id && index === coachThoughts.length - 1;
+
+                    return (
+                      <section
+                        className={`mind-entry chat-row ${
+                          isLatestThought ? "is-latest-observation" : ""
+                        } stream-depth-${Math.min(coachThoughts.length - 1 - index, 4)}`}
+                        key={thought.id}
+                      >
+                        <div className="mind-entry-time">{formatObservationTime(thought.created_at, index)}</div>
+                        <div className="observation-row">
+                          <div className="observation-icon" aria-hidden="true">
+                            {thought.icon}
+                          </div>
+                          <div className="observation-bubble thought-bubble">
+                            <div className="thought-meta-row">
+                              <span className="thought-coach-name">{thought.coachName}</span>
+                            </div>
+                            <p>{thought.text}</p>
                           </div>
                         </div>
-                      </div>
-                    </section>
-                  ))
+                      </section>
+                    );
+                  })
                 )}
               </div>
             </div>
