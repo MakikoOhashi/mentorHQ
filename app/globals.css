@@ -1198,6 +1198,115 @@ blockquote {
   background: linear-gradient(180deg, #fff9ed, #ffffff);
 }
 
+.statement-card,
+.final-choice-card {
+  margin-bottom: 16px;
+}
+
+.reason-label {
+  display: block;
+  margin-top: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.reason-textarea {
+  width: 100%;
+  margin-top: 10px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text);
+  resize: vertical;
+  min-height: 88px;
+}
+
+.statement-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.statement-stack-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid var(--border);
+}
+
+.statement-stack-item p,
+.result-explanation-card p,
+.observation-reason {
+  margin: 0;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.statement-index {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.final-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.final-choice-button {
+  padding: 14px 0;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text);
+  font-weight: 800;
+}
+
+.final-choice-button.is-selected {
+  border-color: #cbd7ff;
+  background: #f7f8ff;
+  color: var(--accent);
+}
+
+.result-explanation-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+  margin-bottom: 16px;
+}
+
+.result-explanation-card {
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: #fffdfa;
+}
+
+.result-explanation-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.observation-reason {
+  margin-top: 8px;
+}
+
 .quiet-status-box {
   margin-top: 14px;
   padding: 12px 14px;

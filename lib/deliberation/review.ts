@@ -1,8 +1,16 @@
 import type { DailyReviewInput, ObservationEvent } from "@/lib/deliberation/types";
 import type { MemorySummary } from "@/lib/deliberation/session-memory";
 
-function getMisunderstandingLabel(value: ObservationEvent["misunderstanding_type"] | string | null): string {
+function getObservationLabel(value: ObservationEvent["misunderstanding_type"] | string | null): string {
   switch (value) {
+    case "memory_based_judgment":
+      return "数字や記憶を根拠に置く判断";
+    case "condition_based_judgment":
+      return "条件句を根拠に置く判断";
+    case "intuition_based_judgment":
+      return "直感寄りの判断";
+    case "uncertainty_signal":
+      return "迷いを残した判断";
     case "starting_point_confusion":
       return "起算点の取り方";
     case "condition_omission":
@@ -11,26 +19,35 @@ function getMisunderstandingLabel(value: ObservationEvent["misunderstanding_type
       return "条件を見て進める姿勢";
     case "rushed_answer":
       return "確認前に答える傾向";
-    case "unknown":
-      return "判断根拠の置き方";
     default:
       return "判断根拠の置き方";
   }
 }
 
-function getMostRepeatedMisunderstanding(
+function isObservationType(value: string): value is ObservationEvent["misunderstanding_type"] {
+  return (
+    value === "starting_point_confusion" ||
+    value === "condition_omission" ||
+    value === "stable_progress" ||
+    value === "rushed_answer" ||
+    value === "memory_based_judgment" ||
+    value === "condition_based_judgment" ||
+    value === "intuition_based_judgment" ||
+    value === "uncertainty_signal" ||
+    value === "unknown"
+  );
+}
+
+function getMostRepeatedObservation(
   observations: ObservationEvent[],
   memorySummary?: MemorySummary | null
 ): ObservationEvent["misunderstanding_type"] | "unknown" {
-  if (memorySummary?.repeatedMisunderstandingDetected && memorySummary.mostRepeatedMisunderstanding) {
-    if (
-      memorySummary.mostRepeatedMisunderstanding === "starting_point_confusion" ||
-      memorySummary.mostRepeatedMisunderstanding === "condition_omission" ||
-      memorySummary.mostRepeatedMisunderstanding === "stable_progress" ||
-      memorySummary.mostRepeatedMisunderstanding === "rushed_answer"
-    ) {
-      return memorySummary.mostRepeatedMisunderstanding;
-    }
+  if (
+    memorySummary?.repeatedMisunderstandingDetected &&
+    memorySummary.mostRepeatedMisunderstanding &&
+    isObservationType(memorySummary.mostRepeatedMisunderstanding)
+  ) {
+    return memorySummary.mostRepeatedMisunderstanding;
   }
 
   const counts = observations.reduce<Map<ObservationEvent["misunderstanding_type"], number>>((map, observation) => {
@@ -38,30 +55,54 @@ function getMostRepeatedMisunderstanding(
     return map;
   }, new Map());
 
-  return (
-    Array.from(counts.entries()).sort((left, right) => right[1] - left[1])[0]?.[0] ??
-    "unknown"
-  );
+  return Array.from(counts.entries()).sort((left, right) => right[1] - left[1])[0]?.[0] ?? "unknown";
 }
 
-function buildTomorrowFocus(misunderstandingType: ObservationEvent["misunderstanding_type"] | "unknown"): string {
-  if (misunderstandingType === "starting_point_confusion") {
-    return "明日は起算点を言い換えて確認し、いつから数えるのかを先に揃えて見ます。";
+function buildPatternSummaries(observations: ObservationEvent[]): string[] {
+  const memoryCount = observations.filter((observation) => observation.reasoning_style === "memory_based").length;
+  const conditionCount = observations.filter((observation) => observation.reasoning_style === "condition_based").length;
+  const intuitionCount = observations.filter((observation) => observation.reasoning_style === "intuition").length;
+  const uncertaintyCount = observations.filter((observation) => observation.reasoning_style === "uncertainty").length;
+
+  const patterns: string[] = [];
+
+  if (memoryCount > 0) {
+    patterns.push(`数字や記憶を根拠に置く場面が ${memoryCount} 回ありました。`);
   }
 
-  if (misunderstandingType === "condition_omission") {
-    return "明日は条件句を先に拾い、結論の前に落としていない前提がないかを見ます。";
+  if (conditionCount > 0) {
+    patterns.push(`条件句や要件を見て判断する場面が ${conditionCount} 回ありました。`);
   }
 
-  if (misunderstandingType === "stable_progress") {
-    return "明日は条件を見てから答える流れを保ち、安定して再現できるかを見ます。";
+  if (intuitionCount > 0) {
+    patterns.push(`直感寄りの判断が ${intuitionCount} 回ありました。`);
   }
 
-  if (misunderstandingType === "rushed_answer") {
-    return "明日は答える前の確認を一拍置き、起算点や条件句を先に見る流れを整えます。";
+  if (uncertaintyCount > 0) {
+    patterns.push(`迷いを残した判断が ${uncertaintyCount} 回ありました。`);
   }
 
-  return "明日は判断根拠を短く言い直してから、結論に進む流れを見ます。";
+  return patterns.slice(0, 3);
+}
+
+function buildCoachComment(repeatedObservation: ObservationEvent["misunderstanding_type"] | "unknown"): string {
+  if (repeatedObservation === "memory_based_judgment") {
+    return "今日は数字や記憶から先に入る傾向が見えました。明日は条件句まで口に出してから結論へ進む流れを見ます。";
+  }
+
+  if (repeatedObservation === "condition_based_judgment") {
+    return "今日は条件句を拾って考える場面が多く見えました。この良い流れをそのまま安定させます。";
+  }
+
+  if (repeatedObservation === "intuition_based_judgment") {
+    return "今日は直感で進む場面がありました。明日は一言でも根拠を置いてから答える流れを作ります。";
+  }
+
+  if (repeatedObservation === "uncertainty_signal") {
+    return "今日は迷いを残しながら進む場面が目立ちました。明日は条件か数字のどちらを根拠にするかを先に決めます。";
+  }
+
+  return "今日は判断根拠の置き方に揺れが見えました。明日も同じ観点で短く追います。";
 }
 
 export function buildDailyReviewInput(params: {
@@ -70,30 +111,24 @@ export function buildDailyReviewInput(params: {
   memorySummary?: MemorySummary | null;
 }): DailyReviewInput {
   const { dailySessionId, observations, memorySummary } = params;
-  const repeatedMisunderstanding = getMostRepeatedMisunderstanding(observations, memorySummary);
-  const repeatedLabel = getMisunderstandingLabel(repeatedMisunderstanding);
+  const repeatedObservation = getMostRepeatedObservation(observations, memorySummary);
+  const repeatedLabel = getObservationLabel(repeatedObservation);
   const firstObservation = observations[0]?.note ?? "まだ十分な観察が集まっていません。";
   const latestObservation = observations.at(-1)?.note ?? "短い観察ログを残しました。";
-  const repeatedPatternLine =
-    repeatedMisunderstanding === "unknown"
-      ? "同じ迷い方がある可能性は残るため、次回も判断根拠の置き方を見ます。"
-      : `${repeatedLabel}に関する迷い方が今日の3問で繰り返し見えました。`;
-  const tomorrowFocus = buildTomorrowFocus(repeatedMisunderstanding);
+  const patternSummaries = buildPatternSummaries(observations);
+  const totalStatements = observations.length;
 
   return {
     daily_session_id: dailySessionId,
-    summary: `今日は3問を通じて「${firstObservation}」から始まり、最後は「${latestObservation}」という傾向で観測がまとまりました。${repeatedPatternLine}`,
-    key_observations: observations.map((observation, index) => `${index + 1}. ${observation.note}`),
-    repeated_patterns: [repeatedPatternLine, tomorrowFocus],
-    coach_comment:
-      repeatedMisunderstanding === "starting_point_confusion"
-        ? "今日は起算点を置く場所で迷いが残りました。まだ断定せず、明日も同じ入口から短く確認します。"
-        : repeatedMisunderstanding === "condition_omission"
-          ? "今日は条件句を拾う前に結論へ進みがちでした。明日も読み落としの有無を先に見ます。"
-          : repeatedMisunderstanding === "stable_progress"
-            ? "今日は条件を見てから答える流れが見えていました。明日も同じ姿勢が安定するかを見ます。"
-            : repeatedMisunderstanding === "rushed_answer"
-              ? "今日は確認前に答えへ進む傾向が見えました。明日は一拍置く流れを先に整えます。"
-          : "今日は根拠の置き方に揺れが見えました。まだ判断せず、明日も同じ観点で短く追います。"
+    summary: `今日は ${totalStatements} 件の肢別観察を通じて、「${firstObservation}」から始まり、最後は「${latestObservation}」という流れが見えました。最も多かったのは「${repeatedLabel}」です。`,
+    key_observations: observations.map((observation) => {
+      const statementLabel = observation.statement_index ? `肢${observation.statement_index}` : "全体";
+      return `${statementLabel}: ${observation.note}`;
+    }),
+    repeated_patterns:
+      patternSummaries.length > 0
+        ? patternSummaries
+        : ["判断根拠の置き方はまだ一定していないため、次回も同じ観点で観察します。"],
+    coach_comment: buildCoachComment(repeatedObservation)
   };
 }

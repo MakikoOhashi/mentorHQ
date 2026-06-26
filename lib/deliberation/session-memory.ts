@@ -50,6 +50,10 @@ type MisunderstandingType =
   | "condition_omission"
   | "stable_progress"
   | "rushed_answer"
+  | "memory_based_judgment"
+  | "condition_based_judgment"
+  | "intuition_based_judgment"
+  | "uncertainty_signal"
   | "unknown";
 
 type SaveSessionInput = {
@@ -314,6 +318,16 @@ function toSerializableObservationEvent(snapshot: QueryDocumentSnapshot): Observ
     daily_session_id: data.daily_session_id,
     question_id: data.question_id,
     question_index: data.question_index,
+    statement_index: typeof data.statement_index === "number" ? data.statement_index : null,
+    learner_choice: data.learner_choice === "correct" || data.learner_choice === "incorrect" ? data.learner_choice : null,
+    learner_reason: typeof data.learner_reason === "string" ? data.learner_reason : null,
+    reasoning_style:
+      data.reasoning_style === "memory_based" ||
+      data.reasoning_style === "condition_based" ||
+      data.reasoning_style === "intuition" ||
+      data.reasoning_style === "uncertainty"
+        ? data.reasoning_style
+        : null,
     intervention_type: data.intervention_type,
     misunderstanding_type: data.misunderstanding_type,
     confidence: typeof data.confidence === "number" ? data.confidence : null,
@@ -414,6 +428,10 @@ function isObservationMisunderstandingType(value: unknown): value is Observation
     value === "condition_omission" ||
     value === "stable_progress" ||
     value === "rushed_answer" ||
+    value === "memory_based_judgment" ||
+    value === "condition_based_judgment" ||
+    value === "intuition_based_judgment" ||
+    value === "uncertainty_signal" ||
     value === "unknown"
   );
 }
@@ -614,6 +632,14 @@ async function getObservationEventsFromFallback(dailySessionId: string): Promise
   return Array.from(dedupedEvents.values())
     .filter((event) => event.daily_session_id === dailySessionId)
     .sort((left, right) => {
+      if (left.question_index !== right.question_index) {
+        return left.question_index - right.question_index;
+      }
+
+      if ((left.statement_index ?? 0) !== (right.statement_index ?? 0)) {
+        return (left.statement_index ?? 0) - (right.statement_index ?? 0);
+      }
+
       if ((left.created_at ?? "") === (right.created_at ?? "")) {
         return left.question_index - right.question_index;
       }
@@ -822,6 +848,10 @@ async function createObservationEvent(observation: ObservationEventInput): Promi
     daily_session_id: observation.daily_session_id,
     question_id: observation.question_id,
     question_index: observation.question_index,
+    statement_index: observation.statement_index ?? null,
+    learner_choice: observation.learner_choice ?? null,
+    learner_reason: observation.learner_reason ?? null,
+    reasoning_style: observation.reasoning_style ?? null,
     intervention_type: observation.intervention_type,
     misunderstanding_type: observation.misunderstanding_type,
     confidence: observation.confidence,
@@ -838,6 +868,10 @@ async function createObservationEvent(observation: ObservationEventInput): Promi
       daily_session_id: observation.daily_session_id,
       question_id: observation.question_id,
       question_index: observation.question_index,
+      statement_index: observation.statement_index ?? null,
+      learner_choice: observation.learner_choice ?? null,
+      learner_reason: observation.learner_reason ?? null,
+      reasoning_style: observation.reasoning_style ?? null,
       intervention_type: observation.intervention_type,
       misunderstanding_type: observation.misunderstanding_type,
       confidence: observation.confidence,
@@ -1306,6 +1340,10 @@ export async function getObservationEventsForDailySession(dailySessionId: string
           return left.question_index - right.question_index;
         }
 
+        if ((left.statement_index ?? 0) !== (right.statement_index ?? 0)) {
+          return (left.statement_index ?? 0) - (right.statement_index ?? 0);
+        }
+
         if (left.created_at && right.created_at) {
           return left.created_at.localeCompare(right.created_at);
         }
@@ -1319,6 +1357,10 @@ export async function getObservationEventsForDailySession(dailySessionId: string
     console.warn("[firestore] observation events lookup skipped", getErrorDetails(error));
     return getObservationEventsFromFallback(dailySessionId);
   }
+}
+
+export async function recordObservationEvent(observation: ObservationEventInput): Promise<ObservationEvent | null> {
+  return createObservationEvent(observation);
 }
 
 export async function getRecentSessions(limit = RECENT_SESSION_LIMIT): Promise<SessionRecord[]> {

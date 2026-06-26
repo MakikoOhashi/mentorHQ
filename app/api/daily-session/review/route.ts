@@ -40,7 +40,10 @@ export async function POST(request: Request) {
   const tomorrowPlan = await getTomorrowPlanForSession(result.session.id);
 
   return NextResponse.json({
-    session: result.session,
+    session: {
+      ...result.session,
+      observation_count: observations.length
+    },
     learnerCase,
     currentQuestionId,
     totalQuestions: result.session.question_ids.length,

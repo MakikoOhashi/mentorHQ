@@ -3,18 +3,33 @@ import { NextResponse } from "next/server";
 import { getLearnerCaseByQuestionId } from "@/lib/deliberation/mock";
 import {
   getDailyReviewForSession,
-  getLatestDailySession,
+  getDailySessionById,
   getObservationEventsForDailySession,
-  getTomorrowPlanForSession
+  getTomorrowPlanForSession,
+  recordObservationEvent
 } from "@/lib/deliberation/session-memory";
+import type { ObservationEventInput } from "@/lib/deliberation/types";
 
 export const runtime = "nodejs";
 
-export async function GET() {
-  const session = await getLatestDailySession();
+export async function POST(request: Request) {
+  const body = (await request.json()) as {
+    sessionId?: string;
+    observation?: ObservationEventInput;
+  };
 
+  if (!body.sessionId || !body.observation) {
+    return NextResponse.json({ error: "sessionId and observation are required" }, { status: 400 });
+  }
+
+  const session = await getDailySessionById(body.sessionId);
   if (!session) {
-    return NextResponse.json({ session: null });
+    return NextResponse.json({ error: "Failed to find daily session" }, { status: 404 });
+  }
+
+  const savedObservation = await recordObservationEvent(body.observation);
+  if (!savedObservation) {
+    return NextResponse.json({ error: "Failed to record observation" }, { status: 500 });
   }
 
   const currentQuestionId =

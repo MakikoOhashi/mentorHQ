@@ -2,7 +2,10 @@ import type {
   CoachDecision,
   DeliberationEvent,
   ObservationEventInput,
-  ObservationMisunderstandingType
+  ObservationMisunderstandingType,
+  QuestionStatement,
+  ReasoningStyle,
+  StatementChoice
 } from "@/lib/deliberation/types";
 
 export function detectMisunderstandingTypeFromDeliberation(
@@ -90,5 +93,125 @@ export function buildObservationInput(params: {
     misunderstanding_type: misunderstandingType,
     confidence: detectObservationConfidence(params.deliberationEvents),
     note: buildObservationNote(misunderstandingType, params.deliberationEvents)
+  };
+}
+
+export function detectReasoningStyle(reason: string): ReasoningStyle {
+  const normalized = reason.trim().toLowerCase();
+
+  if (!normalized) {
+    return "uncertainty";
+  }
+
+  if (/なんとなく|直感|気がした|たぶん|自信がない|迷|わからない/.test(normalized)) {
+    return "uncertainty";
+  }
+
+  if (/条件|ただし|場合|とき|なら|要件|例外|知った時|範囲内/.test(normalized)) {
+    return "condition_based";
+  }
+
+  if (/覚えて|記憶|数字|条文|3か月|3ヶ月|4分の3|過半数|代表権/.test(normalized)) {
+    return "memory_based";
+  }
+
+  if (normalized.length <= 12) {
+    return "intuition";
+  }
+
+  return "condition_based";
+}
+
+function getReasoningMisunderstandingType(reasoningStyle: ReasoningStyle): ObservationMisunderstandingType {
+  switch (reasoningStyle) {
+    case "memory_based":
+      return "memory_based_judgment";
+    case "condition_based":
+      return "condition_based_judgment";
+    case "intuition":
+      return "intuition_based_judgment";
+    case "uncertainty":
+      return "uncertainty_signal";
+    default:
+      return "unknown";
+  }
+}
+
+function getReasoningIntervention(reasoningStyle: ReasoningStyle) {
+  switch (reasoningStyle) {
+    case "memory_based":
+      return "starting_point_check" as const;
+    case "condition_based":
+      return "condition_check" as const;
+    case "intuition":
+      return "light_monitoring" as const;
+    case "uncertainty":
+      return "slow_down_prompt" as const;
+    default:
+      return "light_monitoring" as const;
+  }
+}
+
+function buildStatementObservationNote(statementIndex: number, reasoningStyle: ReasoningStyle, reason: string): string {
+  if (reasoningStyle === "memory_based") {
+    return `肢${statementIndex}は暗記ベースで判断しています。`;
+  }
+
+  if (reasoningStyle === "condition_based") {
+    return `肢${statementIndex}は条件句や要件を根拠に見ています。`;
+  }
+
+  if (reasoningStyle === "intuition") {
+    return `肢${statementIndex}は直感寄りに判断しています。`;
+  }
+
+  if (reason.trim().length <= 14) {
+    return "理由説明が短く、確信は高くなさそうです。";
+  }
+
+  return `肢${statementIndex}は迷いを残しながら判断しています。`;
+}
+
+function detectStatementConfidence(reasoningStyle: ReasoningStyle, reason: string): number {
+  const base =
+    reasoningStyle === "condition_based"
+      ? 0.76
+      : reasoningStyle === "memory_based"
+        ? 0.66
+        : reasoningStyle === "intuition"
+          ? 0.49
+          : 0.38;
+
+  if (reason.trim().length >= 24 && reasoningStyle !== "uncertainty") {
+    return Math.min(base + 0.08, 0.92);
+  }
+
+  return base;
+}
+
+export function buildStatementObservationInput(params: {
+  dailySessionId: string;
+  questionId: string;
+  questionIndex: number;
+  statementIndex: number;
+  statement: QuestionStatement;
+  learnerChoice: StatementChoice;
+  learnerReason: string;
+}): ObservationEventInput {
+  const reasoningStyle = detectReasoningStyle(params.learnerReason);
+  const misunderstandingType = getReasoningMisunderstandingType(reasoningStyle);
+
+  return {
+    daily_session_id: params.dailySessionId,
+    question_id: params.questionId,
+    question_index: params.questionIndex,
+    statement_index: params.statementIndex,
+    learner_choice: params.learnerChoice,
+    learner_reason: params.learnerReason.trim(),
+    reasoning_style: reasoningStyle,
+    intervention_type: getReasoningIntervention(reasoningStyle),
+    misunderstanding_type: misunderstandingType,
+    confidence: detectStatementConfidence(reasoningStyle, params.learnerReason),
+    note: buildStatementObservationNote(params.statementIndex, reasoningStyle, params.learnerReason)
   };
 }

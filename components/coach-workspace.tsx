@@ -1,18 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { buildObservationInput } from "@/lib/deliberation/observation";
+import { buildStatementObservationInput } from "@/lib/deliberation/observation";
 import type {
-  CoachDecision,
   DailyReview,
   DailySession,
-  DeliberationEvent,
-  DeliberationResponse,
   LearnerCase,
-  LearnerChoice,
   ObservationEvent,
-  ObservationEventInput,
+  StatementChoice,
   TomorrowPlan
 } from "@/lib/deliberation/types";
 
@@ -40,25 +36,17 @@ type LearnerStep =
   | "tomorrow"
   | "goodbye";
 
-type QuestionOption = {
-  label: string;
-  value: LearnerChoice;
-};
+type QuestionPhase = "stem" | "statement" | "final" | "result";
 
-type QuestionConfig = {
-  prompt: string;
-  options: QuestionOption[];
-};
-
-type QuestionCardState = "asking" | "feedback";
-
-type FeedbackSeverity = "good" | "caution" | "retry";
-
-type LatestFeedback = {
+type StatementFeedback = {
   title: string;
   message: string;
-  nextHint: string;
-  severity: FeedbackSeverity;
+};
+
+type FinalResult = {
+  selectedIndex: number;
+  correctIndex: number;
+  summary: string;
 };
 
 const STEP_ORDER: LearnerStep[] = [
@@ -81,187 +69,27 @@ const STEP_LABELS: Record<LearnerStep, string> = {
   goodbye: "Goodbye"
 };
 
-const QUESTION_CONFIGS: Record<string, QuestionConfig> = {
-  q1: {
-    prompt: "どこから数え始めますか？",
-    options: [
-      { label: "最初から", value: "first_position" },
-      { label: "条件を満たしたところから", value: "condition_start" },
-      { label: "わからない", value: "unknown_start" }
-    ]
-  },
-  q2: {
-    prompt: "この条件は使いますか？",
-    options: [
-      { label: "使う", value: "use_condition" },
-      { label: "使わない", value: "ignore_condition" },
-      { label: "迷っている", value: "unsure_condition" }
-    ]
-  },
-  q3: {
-    prompt: "答える前に何を確認しますか？",
-    options: [
-      { label: "起算点", value: "check_starting_point" },
-      { label: "条件句", value: "check_condition" },
-      { label: "単位", value: "check_unit" },
-      { label: "そのまま答える", value: "answer_directly" }
-    ]
-  }
-};
+const STATEMENT_OPTIONS: Array<{ label: string; value: StatementChoice }> = [
+  { label: "○ 正しい", value: "correct" },
+  { label: "× 誤り", value: "incorrect" }
+];
 
-const EVENT_DURATIONS: Record<DeliberationEvent["type"], number> = {
-  observation: 1500,
-  challenge: 2000,
-  revision: 2500,
-  recommendation: 2000,
-  coach_decision: 3000
-};
-
-const CHOICE_OBSERVATION_MAP: Record<LearnerChoice, Omit<ObservationEventInput, "daily_session_id" | "question_id" | "question_index">> = {
-  first_position: {
-    misunderstanding_type: "starting_point_confusion",
-    intervention_type: "starting_point_check",
-    confidence: 0.82,
-    note: "起算点を最初に置いている可能性があります"
+const FEEDBACK_BY_CHOICE: Record<StatementChoice, StatementFeedback> = {
+  correct: {
+    title: "なるほど。",
+    message: "その見方を、短く言葉にして残してください。"
   },
-  condition_start: {
-    misunderstanding_type: "stable_progress",
-    intervention_type: "light_monitoring",
-    confidence: 0.7,
-    note: "条件を見て起算点を調整できています"
-  },
-  unknown_start: {
-    misunderstanding_type: "starting_point_confusion",
-    intervention_type: "starting_point_check",
-    confidence: 0.58,
-    note: "起算点の置き方をまだ迷っています"
-  },
-  use_condition: {
-    misunderstanding_type: "stable_progress",
-    intervention_type: "light_monitoring",
-    confidence: 0.74,
-    note: "条件句を判断材料として使えています"
-  },
-  ignore_condition: {
-    misunderstanding_type: "condition_omission",
-    intervention_type: "condition_check",
-    confidence: 0.84,
-    note: "条件句を読み飛ばしている可能性があります"
-  },
-  unsure_condition: {
-    misunderstanding_type: "condition_omission",
-    intervention_type: "condition_check",
-    confidence: 0.62,
-    note: "条件句を使う場面で迷いが残っています"
-  },
-  check_starting_point: {
-    misunderstanding_type: "stable_progress",
-    intervention_type: "light_monitoring",
-    confidence: 0.72,
-    note: "答える前に起算点を確認しようとしています"
-  },
-  check_condition: {
-    misunderstanding_type: "stable_progress",
-    intervention_type: "light_monitoring",
-    confidence: 0.72,
-    note: "答える前に条件句へ目を向けています"
-  },
-  check_unit: {
-    misunderstanding_type: "stable_progress",
-    intervention_type: "light_monitoring",
-    confidence: 0.66,
-    note: "単位の確認を挟んで慎重に進めています"
-  },
-  answer_directly: {
-    misunderstanding_type: "rushed_answer",
-    intervention_type: "slow_down_prompt",
-    confidence: 0.86,
-    note: "確認せずに答えへ進む傾向があります"
-  }
-};
-
-const FEEDBACK_MAP: Record<LearnerChoice, LatestFeedback> = {
-  first_position: {
-    severity: "caution",
-    title: "起算点に注意",
-    message: "最初から数えたくなる問題ですが、条件を満たした位置から考える必要があります。",
-    nextHint: "次の問題では「どこから数えるか」を先に決めましょう。"
-  },
-  condition_start: {
-    severity: "good",
-    title: "良い進め方です",
-    message: "条件を見てから起算点を調整できています。",
-    nextHint: "次も、答える前に条件を一度確認しましょう。"
-  },
-  unknown_start: {
-    severity: "retry",
-    title: "ここは大事です",
-    message: "起算点をどこに置くかがまだ揺れています。数え始める位置を先に決めましょう。",
-    nextHint: "次の問題でも「どこから数えるか」を意識して進めましょう。"
-  },
-  use_condition: {
-    severity: "good",
-    title: "良い進め方です",
-    message: "条件を判断材料として使えています。",
-    nextHint: "次も、条件を見てから結論へ進みましょう。"
-  },
-  ignore_condition: {
-    severity: "caution",
-    title: "条件句を見落としています",
-    message: "条件を使わずに進めると、答えがずれやすくなります。",
-    nextHint: "次は「この条件は使う？」を先に確認しましょう。"
-  },
-  unsure_condition: {
-    severity: "caution",
-    title: "条件句に迷いがあります",
-    message: "条件を使うか迷ったときほど、本文を一度止まって確認するのが大切です。",
-    nextHint: "次は条件句を一つ拾ってから答えましょう。"
-  },
-  check_starting_point: {
-    severity: "good",
-    title: "良い確認です",
-    message: "答える前に起算点を確かめる流れができています。",
-    nextHint: "次も、その確認を先に入れてから進みましょう。"
-  },
-  check_condition: {
-    severity: "good",
-    title: "良い確認です",
-    message: "条件句を見てから答えようとできています。",
-    nextHint: "次も、条件を一度確認してから答えましょう。"
-  },
-  check_unit: {
-    severity: "good",
-    title: "丁寧に進められています",
-    message: "答える前に単位を確認できています。",
-    nextHint: "次も、確認ポイントを一つ決めてから進みましょう。"
-  },
-  answer_directly: {
-    severity: "retry",
-    title: "少し急いでいます",
-    message: "答える前に、起算点・条件・単位のどれを見るか決めましょう。",
-    nextHint: "次の問題では確認してから進みましょう。"
+  incorrect: {
+    title: "ありがとうございます。",
+    message: "どこが気になったのかを1〜2行で残してください。"
   }
 };
 
 function getObservationIcon(observation: ObservationEvent) {
-  if (observation.intervention_type === "starting_point_check") return "🧠";
-  if (observation.intervention_type === "contrast_check" || observation.intervention_type === "condition_check") {
-    return "🔁";
-  }
-  if (observation.intervention_type === "integrated_retry" || observation.intervention_type === "slow_down_prompt") {
-    return "💭";
-  }
+  if (observation.reasoning_style === "memory_based") return "🧠";
+  if (observation.reasoning_style === "condition_based") return "🔁";
+  if (observation.reasoning_style === "uncertainty") return "💭";
   return "📌";
-}
-
-function getCumulativeEventDelay(events: DeliberationEvent[], index: number) {
-  let total = 350;
-
-  for (let currentIndex = 0; currentIndex <= index; currentIndex += 1) {
-    total += EVENT_DURATIONS[events[currentIndex].type];
-  }
-
-  return total;
 }
 
 function getCurrentStep(session: DailySession | null, tomorrowPlan: TomorrowPlan | null): LearnerStep {
@@ -302,23 +130,34 @@ function formatObservationTime(createdAt: string | null, index: number) {
   return `09:${String(index * 2 + 1).padStart(2, "0")}`;
 }
 
-function buildObservationFromChoice(params: {
-  dailySessionId: string;
-  questionId: string;
-  questionIndex: number;
-  learnerChoice: LearnerChoice;
-}): ObservationEventInput {
-  const mapped = CHOICE_OBSERVATION_MAP[params.learnerChoice];
+function formatChoiceLabel(choice: ObservationEvent["learner_choice"]) {
+  if (choice === "correct") return "○";
+  if (choice === "incorrect") return "×";
+  return "未記録";
+}
 
-  return {
-    daily_session_id: params.dailySessionId,
-    question_id: params.questionId,
-    question_index: params.questionIndex,
-    intervention_type: mapped.intervention_type,
-    misunderstanding_type: mapped.misunderstanding_type,
-    confidence: mapped.confidence,
-    note: mapped.note
-  };
+function formatReasoningStyle(reasoningStyle: ObservationEvent["reasoning_style"]) {
+  if (reasoningStyle === "memory_based") return "memory_based";
+  if (reasoningStyle === "condition_based") return "condition_based";
+  if (reasoningStyle === "intuition") return "intuition";
+  if (reasoningStyle === "uncertainty") return "uncertainty";
+  return "unclassified";
+}
+
+function getQuestionPhaseFromObservations(learnerCase: LearnerCase | null, questionObservations: ObservationEvent[]): QuestionPhase {
+  if (!learnerCase) {
+    return "stem";
+  }
+
+  if (questionObservations.length === 0) {
+    return "stem";
+  }
+
+  if (questionObservations.length < learnerCase.statements.length) {
+    return "statement";
+  }
+
+  return "final";
 }
 
 export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
@@ -329,102 +168,19 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const [latestObservation, setLatestObservation] = useState<ObservationEvent | null>(null);
   const [dailyReview, setDailyReview] = useState<DailyReview | null>(null);
   const [tomorrowPlan, setTomorrowPlan] = useState<TomorrowPlan | null>(null);
-  const [events, setEvents] = useState<DeliberationEvent[]>([]);
-  const [decision, setDecision] = useState<CoachDecision | null>(null);
-  const [status, setStatus] = useState<"idle" | "loading" | "streaming" | "done" | "error">("idle");
-  const [sessionActionStatus, setSessionActionStatus] = useState<"idle" | "starting" | "advancing">("idle");
+  const [sessionActionStatus, setSessionActionStatus] = useState<"idle" | "starting" | "saving" | "advancing">("idle");
   const [reviewActionStatus, setReviewActionStatus] = useState<"idle" | "generating">("idle");
   const [planActionStatus, setPlanActionStatus] = useState<"idle" | "generating">("idle");
   const [learnerStepOverride, setLearnerStepOverride] = useState<LearnerStep | null>(null);
-  const [mode, setMode] = useState<"mock" | "ai">("mock");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [currentChoice, setCurrentChoice] = useState<LearnerChoice | null>(null);
-  const [questionCardState, setQuestionCardState] = useState<QuestionCardState>("asking");
-  const [latestFeedback, setLatestFeedback] = useState<LatestFeedback | null>(null);
-  const [feedbackStep, setFeedbackStep] = useState<LearnerStep | null>(null);
-  const [feedbackLearnerCase, setFeedbackLearnerCase] = useState<LearnerCase | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
-  const timeoutIdsRef = useRef<number[]>([]);
-
-  const clearScheduledUpdates = useCallback(() => {
-    timeoutIdsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
-    timeoutIdsRef.current = [];
-  }, []);
-
-  const clearLearnerFlow = useCallback(() => {
-    setDailySession(null);
-    setCurrentQuestionId(null);
-    setObservations([]);
-    setLatestObservation(null);
-    setDailyReview(null);
-    setTomorrowPlan(null);
-    setLearnerCase(initialCase);
-    setEvents([]);
-    setDecision(null);
-    setStatus("idle");
-    setErrorMessage(null);
-    setCurrentChoice(null);
-    setQuestionCardState("asking");
-    setLatestFeedback(null);
-    setFeedbackStep(null);
-    setFeedbackLearnerCase(null);
-    setLearnerStepOverride(null);
-    clearScheduledUpdates();
-  }, [clearScheduledUpdates, initialCase]);
-
-  const runDeliberation = useCallback(async (targetCase?: LearnerCase) => {
-    clearScheduledUpdates();
-    setStatus("loading");
-    setEvents([]);
-    setDecision(null);
-
-    try {
-      const response = await fetch("/api/deliberate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ learnerCase: targetCase ?? learnerCase })
-      });
-
-      if (!response.ok) {
-        throw new Error("Deliberation request failed.");
-      }
-
-      const payload = (await response.json()) as DeliberationResponse;
-      setMode(payload.mode);
-
-      if (payload.deliberation_events.length === 0) {
-        setDecision(payload.coach_decision);
-        setStatus("done");
-        return;
-      }
-
-      setStatus("streaming");
-
-      payload.deliberation_events.forEach((event, index) => {
-        const timeoutId = window.setTimeout(() => {
-          setEvents((current) => [...current, event]);
-
-          if (index === payload.deliberation_events.length - 1) {
-            const decisionTimeoutId = window.setTimeout(() => {
-              setDecision(payload.coach_decision);
-              setStatus("done");
-            }, 220);
-            timeoutIdsRef.current.push(decisionTimeoutId);
-          }
-        }, getCumulativeEventDelay(payload.deliberation_events, index));
-
-        timeoutIdsRef.current.push(timeoutId);
-      });
-    } catch {
-      setStatus("error");
-    }
-  }, [clearScheduledUpdates, learnerCase]);
-
-  useEffect(() => () => {
-    clearScheduledUpdates();
-  }, [clearScheduledUpdates]);
+  const [questionPhase, setQuestionPhase] = useState<QuestionPhase>("stem");
+  const [currentStatementIndex, setCurrentStatementIndex] = useState(0);
+  const [statementChoice, setStatementChoice] = useState<StatementChoice | null>(null);
+  const [statementReason, setStatementReason] = useState("");
+  const [finalChoice, setFinalChoice] = useState<number | null>(null);
+  const [finalResult, setFinalResult] = useState<FinalResult | null>(null);
+  const [queuedNextPayload, setQueuedNextPayload] = useState<DailySessionPayload | null>(null);
 
   const applyDailySessionPayload = useCallback((payload: DailySessionPayload) => {
     setDailySession(payload.session);
@@ -437,14 +193,26 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     if (payload.learnerCase) {
       setLearnerCase(payload.learnerCase);
     }
+  }, []);
 
-    if (payload.session.status === "completed") {
-      clearScheduledUpdates();
-      setEvents([]);
-      setDecision(null);
-      setStatus("idle");
-    }
-  }, [clearScheduledUpdates]);
+  const clearLearnerFlow = useCallback(() => {
+    setDailySession(null);
+    setCurrentQuestionId(null);
+    setObservations([]);
+    setLatestObservation(null);
+    setDailyReview(null);
+    setTomorrowPlan(null);
+    setLearnerCase(initialCase);
+    setErrorMessage(null);
+    setLearnerStepOverride(null);
+    setQuestionPhase("stem");
+    setCurrentStatementIndex(0);
+    setStatementChoice(null);
+    setStatementReason("");
+    setFinalChoice(null);
+    setFinalResult(null);
+    setQueuedNextPayload(null);
+  }, [initialCase]);
 
   useEffect(() => {
     let cancelled = false;
@@ -483,6 +251,30 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     };
   }, [applyDailySessionPayload]);
 
+  const currentQuestionObservations = useMemo(
+    () => observations.filter((observation) => observation.question_id === currentQuestionId),
+    [currentQuestionId, observations]
+  );
+
+  useEffect(() => {
+    if (!currentQuestionId || dailySession?.status === "completed" || queuedNextPayload || finalResult) {
+      return;
+    }
+
+    setQuestionPhase(getQuestionPhaseFromObservations(learnerCase, currentQuestionObservations));
+    setCurrentStatementIndex(currentQuestionObservations.length);
+    setStatementChoice(null);
+    setStatementReason("");
+    setFinalChoice(null);
+  }, [
+    currentQuestionId,
+    currentQuestionObservations,
+    dailySession?.status,
+    finalResult,
+    learnerCase,
+    queuedNextPayload
+  ]);
+
   const startDailySession = useCallback(async () => {
     setSessionActionStatus("starting");
     setErrorMessage(null);
@@ -498,25 +290,79 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
 
       const payload = (await response.json()) as DailySessionPayload;
       setLearnerStepOverride(null);
-      setQuestionCardState("asking");
-      setLatestFeedback(null);
-      setFeedbackStep(null);
-      setFeedbackLearnerCase(null);
-      setCurrentChoice(null);
+      setQuestionPhase("stem");
+      setCurrentStatementIndex(0);
+      setStatementChoice(null);
+      setStatementReason("");
+      setFinalChoice(null);
+      setFinalResult(null);
+      setQueuedNextPayload(null);
       applyDailySessionPayload(payload);
-
-      if (payload.learnerCase) {
-        void runDeliberation(payload.learnerCase);
-      }
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Unknown error");
     } finally {
       setSessionActionStatus("idle");
     }
-  }, [applyDailySessionPayload, runDeliberation]);
+  }, [applyDailySessionPayload]);
 
-  const advanceToNextQuestion = useCallback(async () => {
-    if (!dailySession) {
+  const saveStatementObservation = useCallback(async () => {
+    if (!dailySession || !currentQuestionId || !learnerCase || !statementChoice) {
+      return;
+    }
+
+    const currentStatement = learnerCase.statements[currentStatementIndex];
+    if (!currentStatement || statementReason.trim().length === 0) {
+      return;
+    }
+
+    setSessionActionStatus("saving");
+    setErrorMessage(null);
+
+    try {
+      const observation = buildStatementObservationInput({
+        dailySessionId: dailySession.id,
+        questionId: currentQuestionId,
+        questionIndex: dailySession.current_index,
+        statementIndex: currentStatementIndex + 1,
+        statement: currentStatement,
+        learnerChoice: statementChoice,
+        learnerReason: statementReason
+      });
+
+      const response = await fetch("/api/daily-session/observation", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          sessionId: dailySession.id,
+          observation
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error("Observation save failed.");
+      }
+
+      const payload = (await response.json()) as DailySessionPayload;
+      applyDailySessionPayload(payload);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unknown error");
+    } finally {
+      setSessionActionStatus("idle");
+    }
+  }, [
+    applyDailySessionPayload,
+    currentQuestionId,
+    currentStatementIndex,
+    dailySession,
+    learnerCase,
+    statementChoice,
+    statementReason
+  ]);
+
+  const submitFinalAnswer = useCallback(async () => {
+    if (!dailySession || !learnerCase || !currentQuestionId || !finalChoice) {
       return;
     }
 
@@ -524,37 +370,13 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     setErrorMessage(null);
 
     try {
-      const observation =
-        currentQuestionId && currentChoice
-          ? buildObservationFromChoice({
-              dailySessionId: dailySession.id,
-              questionId: currentQuestionId,
-              questionIndex: dailySession.current_index,
-              learnerChoice: currentChoice
-            })
-          : currentQuestionId && decision
-            ? buildObservationInput({
-                dailySessionId: dailySession.id,
-                questionId: currentQuestionId,
-                questionIndex: dailySession.current_index,
-                coachDecision: decision,
-                deliberationEvents: events
-              })
-            : undefined;
-
-      const feedback = currentChoice ? FEEDBACK_MAP[currentChoice] : null;
-      const answeredStep = currentStep;
-      const answeredLearnerCase = learnerCase;
-
       const response = await fetch("/api/daily-session/advance", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          sessionId: dailySession.id,
-          learner_choice: currentChoice ?? undefined,
-          observation
+          sessionId: dailySession.id
         })
       });
 
@@ -563,23 +385,35 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       }
 
       const payload = (await response.json()) as DailySessionPayload;
-      setLearnerStepOverride(payload.session.status === "completed" ? answeredStep : answeredStep);
-      setQuestionCardState("feedback");
-      setLatestFeedback(feedback);
-      setFeedbackStep(answeredStep);
-      setFeedbackLearnerCase(answeredLearnerCase);
-      setCurrentChoice(null);
-      applyDailySessionPayload(payload);
-
-      if (payload.session.status !== "completed" && payload.learnerCase) {
-        void runDeliberation(payload.learnerCase);
-      }
+      setFinalResult({
+        selectedIndex: finalChoice,
+        correctIndex: learnerCase.correctStatementIndex,
+        summary: learnerCase.finalSummary
+      });
+      setQuestionPhase("result");
+      setQueuedNextPayload(payload);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Unknown error");
     } finally {
       setSessionActionStatus("idle");
     }
-  }, [applyDailySessionPayload, currentChoice, currentQuestionId, dailySession, decision, events, runDeliberation]);
+  }, [currentQuestionId, dailySession, finalChoice, learnerCase]);
+
+  const proceedAfterResult = useCallback(() => {
+    if (!queuedNextPayload) {
+      return;
+    }
+
+    applyDailySessionPayload(queuedNextPayload);
+    setQueuedNextPayload(null);
+    setFinalResult(null);
+    setQuestionPhase("stem");
+    setCurrentStatementIndex(0);
+    setStatementChoice(null);
+    setStatementReason("");
+    setFinalChoice(null);
+    setLearnerStepOverride(null);
+  }, [applyDailySessionPayload, queuedNextPayload]);
 
   const generateDailyReview = useCallback(async () => {
     if (!dailySession || dailySession.status !== "completed") {
@@ -660,27 +494,10 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const completedQuestionCount = dailySession
     ? Math.min(dailySession.current_index, dailySession.question_ids.length)
     : 0;
-  const currentQuestionConfig = currentQuestionId ? QUESTION_CONFIGS[currentQuestionId] : null;
-  const displayStep = questionCardState === "feedback" && feedbackStep ? feedbackStep : currentStep;
-  const isQuestionStep = displayStep.startsWith("question-");
-  const displayQuestionCase = questionCardState === "feedback" && feedbackLearnerCase ? feedbackLearnerCase : learnerCase;
-  const displayQuestionConfig =
-    questionCardState === "feedback" && feedbackStep
-      ? QUESTION_CONFIGS[`q${STEP_ORDER.indexOf(feedbackStep)}`] ?? currentQuestionConfig
-      : currentQuestionConfig;
-  const displayQuestionNumber =
-    questionCardState === "feedback" && feedbackStep
-      ? STEP_ORDER.indexOf(feedbackStep)
-      : (activeQuestionNumber ?? 1);
-  const nextQuestionLabel = feedbackStep === "question-3" ? "今日のふりかえりへ" : "次へ";
-
-  const proceedFromFeedback = useCallback(() => {
-    setQuestionCardState("asking");
-    setLatestFeedback(null);
-    setFeedbackStep(null);
-    setFeedbackLearnerCase(null);
-    setLearnerStepOverride(null);
-  }, []);
+  const isQuestionStep = currentStep.startsWith("question-");
+  const currentStatement = learnerCase.statements[currentStatementIndex] ?? null;
+  const nextResultLabel =
+    queuedNextPayload?.session.status === "completed" ? "今日のふりかえりへ" : "次の問題へ";
 
   return (
     <main className="demo-viewport">
@@ -716,11 +533,6 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                       className="phone-menu-item"
                       onClick={() => {
                         setLearnerStepOverride("morning");
-                        setQuestionCardState("asking");
-                        setCurrentChoice(null);
-                        setLatestFeedback(null);
-                        setFeedbackStep(null);
-                        setFeedbackLearnerCase(null);
                         setMenuOpen(false);
                       }}
                       type="button"
@@ -768,8 +580,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                     <span className="panel-kicker">Morning Brief</span>
                     <h3>今日の学習開始</h3>
                   </div>
-                  <p className="body-copy">今日は3問だけ進めます。問題を見て、選んで、次へ進みます。</p>
-                  <div className="reflection-box">Start Daily Session を押すと 1問目が始まります。</div>
+                  <p className="body-copy">今日は各問題を4つの肢に分けて観察し、最後にだけ全体回答します。</p>
+                  <div className="reflection-box">Start Daily Session を押すと 1問目の問題文だけが表示されます。</div>
                   <button
                     className="primary-button phone-button"
                     onClick={() => void startDailySession()}
@@ -781,30 +593,49 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                 </>
               ) : null}
 
-              {isQuestionStep && displayQuestionConfig && displayQuestionCase ? (
+              {isQuestionStep ? (
                 <>
                   <div className="panel-heading tight">
-                    <span className="panel-kicker">{STEP_LABELS[displayStep]}</span>
-                    <h3>{displayQuestionConfig.prompt}</h3>
+                    <span className="panel-kicker">{STEP_LABELS[currentStep]}</span>
+                    <h3>{learnerCase.questionTitle}</h3>
                   </div>
                   <div className="question-meta-strip">
-                    <span>{displayQuestionNumber} / {totalQuestions}</span>
-                    <span>{displayQuestionCase.theme}</span>
+                    <span>
+                      {activeQuestionNumber} / {totalQuestions}
+                    </span>
+                    <span>{learnerCase.theme}</span>
                   </div>
-                  <p className="body-copy">{displayQuestionCase.questionStem}</p>
-                  <div className="prompt-card">
-                    <span className="summary-label">今日の問題</span>
-                    <p>{displayQuestionCase.currentLeg}</p>
-                  </div>
-                  {questionCardState === "asking" ? (
+                  <p className="body-copy">{learnerCase.questionStem}</p>
+
+                  {questionPhase === "stem" ? (
                     <>
-                      <div className="choice-list" role="radiogroup" aria-label={displayQuestionConfig.prompt}>
-                        {displayQuestionConfig.options.map((option) => (
+                      <div className="prompt-card">
+                        <span className="summary-label">Step 1</span>
+                        <p>まずは問題文だけを確認します。まだ正解は選びません。</p>
+                      </div>
+                      <button
+                        className="primary-button phone-button"
+                        onClick={() => setQuestionPhase("statement")}
+                        type="button"
+                      >
+                        肢1を見る
+                      </button>
+                    </>
+                  ) : null}
+
+                  {questionPhase === "statement" && currentStatement ? (
+                    <>
+                      <div className="prompt-card statement-card">
+                        <span className="summary-label">肢{currentStatementIndex + 1}</span>
+                        <p>{currentStatement.text}</p>
+                      </div>
+                      <div className="choice-list" role="radiogroup" aria-label={`肢${currentStatementIndex + 1}の判断`}>
+                        {STATEMENT_OPTIONS.map((option) => (
                           <button
-                            aria-checked={currentChoice === option.value}
-                            className={`choice-card ${currentChoice === option.value ? "is-selected" : ""}`}
+                            aria-checked={statementChoice === option.value}
+                            className={`choice-card ${statementChoice === option.value ? "is-selected" : ""}`}
                             key={option.value}
-                            onClick={() => setCurrentChoice(option.value)}
+                            onClick={() => setStatementChoice(option.value)}
                             role="radio"
                             type="button"
                           >
@@ -813,35 +644,97 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                           </button>
                         ))}
                       </div>
+                      {statementChoice ? (
+                        <section className="feedback-card feedback-card--caution">
+                          <span className="feedback-eyebrow">Immediate Coach Feedback</span>
+                          <h4>{FEEDBACK_BY_CHOICE[statementChoice].title}</h4>
+                          <p>{FEEDBACK_BY_CHOICE[statementChoice].message}</p>
+                          <label className="reason-label" htmlFor="statement-reason">
+                            なぜそう思いましたか？
+                          </label>
+                          <textarea
+                            className="reason-textarea"
+                            id="statement-reason"
+                            onChange={(event) => setStatementReason(event.target.value)}
+                            placeholder="例: 3か月という数字を覚えていたため"
+                            rows={3}
+                            value={statementReason}
+                          />
+                          <button
+                            className="primary-button phone-button"
+                            onClick={() => void saveStatementObservation()}
+                            type="button"
+                            disabled={statementReason.trim().length === 0 || sessionActionStatus !== "idle"}
+                          >
+                            {sessionActionStatus === "saving" ? "記録中..." : "この理由を記録する"}
+                          </button>
+                        </section>
+                      ) : null}
+                    </>
+                  ) : null}
+
+                  {questionPhase === "final" ? (
+                    <>
+                      <div className="prompt-card final-choice-card">
+                        <span className="summary-label">全4肢を表示</span>
+                        <div className="statement-stack">
+                          {learnerCase.statements.map((statement, index) => (
+                            <div className="statement-stack-item" key={statement.id}>
+                              <span className="statement-index">{index + 1}</span>
+                              <p>{statement.text}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <p className="body-copy">ここまで考えてきました。では、どの肢が正しいと思いますか？</p>
+                      <div className="final-choice-grid">
+                        {learnerCase.statements.map((statement, index) => (
+                          <button
+                            className={`final-choice-button ${finalChoice === index + 1 ? "is-selected" : ""}`}
+                            key={statement.id}
+                            onClick={() => setFinalChoice(index + 1)}
+                            type="button"
+                          >
+                            {index + 1}
+                          </button>
+                        ))}
+                      </div>
                       <button
                         className="primary-button phone-button"
-                        onClick={() => void advanceToNextQuestion()}
+                        onClick={() => void submitFinalAnswer()}
                         type="button"
-                        disabled={!currentChoice || sessionActionStatus !== "idle"}
+                        disabled={!finalChoice || sessionActionStatus !== "idle"}
                       >
-                        {sessionActionStatus === "advancing" ? "進んでいます..." : "答える"}
+                        {sessionActionStatus === "advancing" ? "送信中..." : "最終回答する"}
                       </button>
                     </>
-                  ) : latestFeedback ? (
-                    <section className={`feedback-card feedback-card--${latestFeedback.severity}`}>
-                      <span className="feedback-eyebrow">
-                        {latestFeedback.severity === "good"
-                          ? "Coach Feedback"
-                          : latestFeedback.severity === "caution"
-                            ? "Coach Feedback"
-                            : "Coach Feedback"}
-                      </span>
-                      <h4>{latestFeedback.title}</h4>
-                      <p>{latestFeedback.message}</p>
-                      <div className="feedback-next-hint">{latestFeedback.nextHint}</div>
-                      <button
-                        className="primary-button phone-button"
-                        onClick={proceedFromFeedback}
-                        type="button"
-                      >
-                        {nextQuestionLabel}
+                  ) : null}
+
+                  {questionPhase === "result" && finalResult ? (
+                    <>
+                      <section className="feedback-card feedback-card--good">
+                        <span className="feedback-eyebrow">Final Feedback</span>
+                        <h4>正解は {finalResult.correctIndex} です。</h4>
+                        <p>
+                          あなたの最終回答は {finalResult.selectedIndex} でした。各肢の見方を下で整理します。
+                        </p>
+                      </section>
+                      <div className="result-explanation-list">
+                        {learnerCase.statements.map((statement, index) => (
+                          <section className="result-explanation-card" key={statement.id}>
+                            <div className="result-explanation-head">
+                              <span>肢{index + 1}</span>
+                              <strong>{statement.isCorrect ? "正しい" : "誤り"}</strong>
+                            </div>
+                            <p>{statement.explanation}</p>
+                          </section>
+                        ))}
+                      </div>
+                      <div className="reflection-box">{finalResult.summary}</div>
+                      <button className="primary-button phone-button" onClick={proceedAfterResult} type="button">
+                        {nextResultLabel}
                       </button>
-                    </section>
+                    </>
                   ) : null}
                 </>
               ) : null}
@@ -877,8 +770,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                     </div>
                   ) : (
                     <div className="review-empty-state">
-                      <p>3問分の様子がそろいました。</p>
-                      <p>ここで今日の流れを短くまとめます。</p>
+                      <p>各問題で4肢ずつ観察がそろいました。</p>
+                      <p>ここで今日の思考傾向を短くまとめます。</p>
                     </div>
                   )}
                   {dailyReview ? (
@@ -933,7 +826,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                     </div>
                   ) : (
                     <div className="review-empty-state">
-                      <p>今日のふりかえりをもとに、明日の練習を組み立てます。</p>
+                      <p>今日の肢別観察をもとに、明日の練習を組み立てます。</p>
                     </div>
                   )}
                   {tomorrowPlan ? (
@@ -984,7 +877,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
 
             <div className="phone-footer">
               <span>{completedQuestionCount} completed</span>
-              <span>{dailySession?.observation_count ?? 0} observations</span>
+              <span>{observations.length} observations</span>
             </div>
           </div>
         </article>
@@ -995,16 +888,14 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
               <div>
                 <span className="panel-kicker">AI Coach Mind</span>
                 <h3>まだ判断せず、観察だけを積みます</h3>
-                <p className="device-caption">
-                  {learnerCase.exam} / {mode === "ai" ? "AI Deliberation" : "Mock Fallback"}
-                </p>
+                <p className="device-caption">{learnerCase.exam} / Statement-by-statement observation</p>
               </div>
               <span className="observation-count-pill">
-                {dailySession ? `${dailySession.observation_count} observations` : "0 observations"}
+                {dailySession ? `${observations.length} observations` : "0 observations"}
               </span>
             </div>
             <p className="observation-intro-copy">
-              起算点や条件句、答える前の確認の仕方を記録しています。結論は Review まで持ち込みません。
+              ○×の結果ではなく、各肢で何を根拠にし、どこで迷ったかを記録しています。
             </p>
 
             {latestObservation ? (
@@ -1016,7 +907,10 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                   </span>
                   <div>
                     <p className="latest-observation-note">{latestObservation.note}</p>
-                    <p className="latest-observation-meta">まだ判断せず、今日のレビューで確認します。</p>
+                    <p className="latest-observation-meta">
+                      肢{latestObservation.statement_index ?? "-"} / {formatChoiceLabel(latestObservation.learner_choice)} /{" "}
+                      {formatReasoningStyle(latestObservation.reasoning_style)}
+                    </p>
                   </div>
                 </div>
               </section>
@@ -1027,7 +921,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                 {observations.length === 0 ? (
                   <div className="observation-empty-state">
                     <p>まだ観察はありません。</p>
-                    <p>Question 1 から順に、右側へ静かに増えていきます。</p>
+                    <p>肢1から順に、右側へ静かに増えていきます。</p>
                   </div>
                 ) : (
                   observations.map((observation, index) => (
@@ -1042,9 +936,13 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                         </div>
                         <div className="observation-bubble">
                           <p>{observation.note}</p>
+                          {observation.learner_reason ? (
+                            <p className="observation-reason">理由: {observation.learner_reason}</p>
+                          ) : null}
                           <div className="observation-meta-row">
-                            <span>{observation.intervention_type}</span>
-                            <span>{observation.misunderstanding_type}</span>
+                            <span>肢{observation.statement_index ?? "-"}</span>
+                            <span>{formatChoiceLabel(observation.learner_choice)}</span>
+                            <span>{formatReasoningStyle(observation.reasoning_style)}</span>
                           </div>
                         </div>
                       </div>

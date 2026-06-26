@@ -30,11 +30,21 @@ export type AgentDefinition = {
   outputSchema: string[];
 };
 
+export type QuestionStatement = {
+  id: string;
+  text: string;
+  isCorrect: boolean;
+  explanation: string;
+};
+
 export type LearnerCase = {
   exam: string;
   theme: string;
   questionTitle: string;
   questionStem: string;
+  statements: QuestionStatement[];
+  correctStatementIndex: number;
+  finalSummary: string;
   currentLeg: string;
   learnerAnswer: string;
   reason: string;
@@ -103,16 +113,37 @@ export const OBSERVATION_MISUNDERSTANDING_TYPES = [
   "condition_omission",
   "stable_progress",
   "rushed_answer",
+  "memory_based_judgment",
+  "condition_based_judgment",
+  "intuition_based_judgment",
+  "uncertainty_signal",
   "unknown"
 ] as const;
 
 export type ObservationMisunderstandingType = (typeof OBSERVATION_MISUNDERSTANDING_TYPES)[number];
+
+export const REASONING_STYLES = [
+  "memory_based",
+  "condition_based",
+  "intuition",
+  "uncertainty"
+] as const;
+
+export type ReasoningStyle = (typeof REASONING_STYLES)[number];
+
+export const STATEMENT_CHOICES = ["correct", "incorrect"] as const;
+
+export type StatementChoice = (typeof STATEMENT_CHOICES)[number];
 
 export type ObservationEvent = {
   id: string;
   daily_session_id: string;
   question_id: string;
   question_index: number;
+  statement_index: number | null;
+  learner_choice: StatementChoice | null;
+  learner_reason: string | null;
+  reasoning_style: ReasoningStyle | null;
   intervention_type: SelectedIntervention;
   misunderstanding_type: ObservationMisunderstandingType;
   confidence: number | null;
@@ -124,6 +155,10 @@ export type ObservationEventInput = {
   daily_session_id: string;
   question_id: string;
   question_index: number;
+  statement_index?: number | null;
+  learner_choice?: StatementChoice | null;
+  learner_reason?: string | null;
+  reasoning_style?: ReasoningStyle | null;
   intervention_type: SelectedIntervention;
   misunderstanding_type: ObservationMisunderstandingType;
   confidence: number | null;
