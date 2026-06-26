@@ -1,4 +1,16 @@
-export type AgentId = "misconception" | "memory" | "load" | "coach";
+export type AgentId = "reading" | "law" | "memory" | "pattern" | "review" | "coach";
+
+export const DIALOGUE_MOVES = [
+  "agree",
+  "disagree",
+  "add_detail",
+  "raise_hypothesis",
+  "update_hypothesis",
+  "connect_previous",
+  "defer"
+] as const;
+
+export type DialogueMove = (typeof DIALOGUE_MOVES)[number];
 
 export type DeliberationRound = number;
 
@@ -25,7 +37,8 @@ export type AgentDefinition = {
   id: AgentId;
   name: string;
   role: string;
-  perspective: string;
+  scope: string[];
+  allowedDialogueMoves: DialogueMove[];
   systemPrompt: string;
   outputSchema: string[];
 };
@@ -56,6 +69,7 @@ type DeliberationEventBase = {
   speaker: AgentId;
   speaker_label: string;
   type: DeliberationEventType;
+  dialogue_move?: DialogueMove;
   message: string;
   hypothesis?: string;
   confidence_before?: number;

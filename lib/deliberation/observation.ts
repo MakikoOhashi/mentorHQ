@@ -14,7 +14,13 @@ export function detectMisunderstandingTypeFromDeliberation(
   deliberationEvents: DeliberationEvent[]
 ): ObservationMisunderstandingType {
   const text = deliberationEvents
-    .filter((event) => event.speaker === "misconception" || event.type === "revision")
+    .filter(
+      (event) =>
+        event.speaker === "reading" ||
+        event.speaker === "law" ||
+        event.speaker === "pattern" ||
+        event.type === "revision"
+    )
     .map((event) => `${event.hypothesis ?? ""} ${event.message}`)
     .join(" ")
     .toLowerCase();
@@ -56,7 +62,7 @@ export function buildObservationNote(
   deliberationEvents: DeliberationEvent[]
 ): string {
   const memoryRepeated = deliberationEvents.some(
-    (event) => event.speaker === "memory" && /前回|同じ|再発/.test(event.message)
+    (event) => (event.speaker === "memory" || event.speaker === "pattern") && /前回|同じ|再発/.test(event.message)
   );
 
   if (memoryRepeated) {

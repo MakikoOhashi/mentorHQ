@@ -2,39 +2,63 @@ import type { AgentDefinition } from "@/lib/deliberation/types";
 
 export const AGENTS: AgentDefinition[] = [
   {
-    id: "misconception",
-    name: "誤解仮説エージェント",
-    role: "誤解仮説の特定",
-    perspective: "学習者の言い回しから、どの概念を取り違えているかを推定する。",
+    id: "reading",
+    name: "Reading Coach",
+    role: "問題文の読み方のずれを拾う",
+    scope: ["条件句", "語尾", "起算点", "読み飛ばし", "問題文の解釈"],
+    allowedDialogueMoves: ["agree", "disagree", "add_detail", "raise_hypothesis", "update_hypothesis"],
     systemPrompt:
-      "message と hypothesis は必ず日本語で短く出し、会議で一言しゃべる感じで最小の誤解だけを示す。",
-    outputSchema: ["message", "hypothesis", "confidence", "recommendation", "influenced_by"]
+      "担当は読み方のずれだけです。態度を固定せず、必要に応じて agree / disagree / add_detail / raise_hypothesis / update_hypothesis を選んで短く話す。",
+    outputSchema: ["message", "hypothesis", "dialogue_move", "confidence", "influenced_by"]
+  },
+  {
+    id: "law",
+    name: "Law Coach",
+    role: "条文要件と法的効果のずれを拾う",
+    scope: ["条文要件", "制度理解", "手続要件", "法的効果", "例外条件"],
+    allowedDialogueMoves: ["agree", "disagree", "add_detail", "raise_hypothesis", "update_hypothesis"],
+    systemPrompt:
+      "担当は法律面だけです。固定の賛否キャラにせず、条文要件や法的効果に応じて短く返す。",
+    outputSchema: ["message", "hypothesis", "dialogue_move", "confidence", "influenced_by"]
   },
   {
     id: "memory",
-    name: "記憶参照エージェント",
-    role: "過去パターンの照合",
-    perspective: "似た誤りの再発性と、以前効いた切り返しを思い出す。",
+    name: "Memory Coach",
+    role: "暗記寄りか理解寄りかを切り分ける",
+    scope: ["暗記ベースか理解ベースか", "理由が再現可能か", "根拠の弱さ", "知識の断片化"],
+    allowedDialogueMoves: ["agree", "add_detail", "raise_hypothesis", "update_hypothesis", "defer"],
     systemPrompt:
-      "message と hypothesis は必ず日本語で短く出し、過去の再発パターンとつなげて軽くツッコむ。",
-    outputSchema: ["message", "hypothesis", "confidence", "recommendation", "influenced_by"]
+      "担当は記憶依存と根拠の再現性です。『知ってた』『なんとなく』の弱さを拾い、短く自然な会話にする。",
+    outputSchema: ["message", "hypothesis", "dialogue_move", "confidence", "influenced_by"]
   },
   {
-    id: "load",
-    name: "負荷調整エージェント",
-    role: "認知負荷の調整",
-    perspective: "今この瞬間に投げる問いが重すぎないかを判断する。",
+    id: "pattern",
+    name: "Pattern Coach",
+    role: "同じ日の中の繰り返しをつなぐ",
+    scope: ["過去の似た問題", "以前も出た誤解", "今日の中で繰り返している傾向", "similar issue / repeated pattern"],
+    allowedDialogueMoves: ["add_detail", "raise_hypothesis", "connect_previous", "update_hypothesis", "defer"],
     systemPrompt:
-      "message と hypothesis は必ず日本語で短く出し、今すぐ投げても重くない一問を優先する。",
-    outputSchema: ["message", "hypothesis", "confidence", "recommendation", "influenced_by"]
+      "担当は近い observation 同士のつながりだけです。本格検索はせず、直近の繰り返しが見えたときだけ connect_previous を使う。",
+    outputSchema: ["message", "hypothesis", "dialogue_move", "confidence", "influenced_by"]
+  },
+  {
+    id: "review",
+    name: "Review Coach",
+    role: "レビュー候補を仮置きする",
+    scope: ["Daily Review に残すべき論点", "明日の練習につながる観察", "結論を急がない"],
+    allowedDialogueMoves: ["add_detail", "connect_previous", "defer", "update_hypothesis"],
+    systemPrompt:
+      "担当はレビュー候補の仮置きです。まだ結論を急がず、必要なら defer で保留にする。",
+    outputSchema: ["message", "hypothesis", "dialogue_move", "confidence", "influenced_by"]
   },
   {
     id: "coach",
-    name: "コーチ",
+    name: "Coach",
     role: "最終介入の決定",
-    perspective: "Agent の議論を統合し、多数決ではなく理由付きで次の問いを決める。",
+    scope: ["会話の統合", "次の問いの決定"],
+    allowedDialogueMoves: ["add_detail", "defer"],
     systemPrompt:
-      "reason と next_question は必ず日本語で短く出力し、selected_intervention は定義済み enum から 1 つだけ選ぶ。",
+      "reason と next_question は日本語で短く出し、selected_intervention は定義済み enum から 1 つだけ選ぶ。",
     outputSchema: ["selected_intervention", "reason", "next_question"]
   }
 ];

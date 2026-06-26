@@ -8,9 +8,11 @@ import type {
 import type { MemorySummary } from "@/lib/deliberation/session-memory";
 
 const speakerLabels = {
-  misconception: "誤解仮説エージェント",
-  memory: "記憶参照エージェント",
-  load: "負荷調整エージェント",
+  reading: "Reading Coach",
+  law: "Law Coach",
+  memory: "Memory Coach",
+  pattern: "Pattern Coach",
+  review: "Review Coach",
   coach: "コーチ"
 } as const;
 
@@ -172,11 +174,12 @@ function getMockEvents(memorySummary?: MemorySummary | null): DeliberationEvent[
   return [
     {
       round: 1,
-      speaker: "misconception",
-      speaker_label: speakerLabels.misconception,
+      speaker: "reading",
+      speaker_label: speakerLabels.reading,
       type: "observation",
-      message: "条文の数字を先に拾って、条件句が後回しになりそう。",
-      hypothesis: "暗記ベースで入り、条件確認が遅れるかも",
+      dialogue_move: "raise_hypothesis",
+      message: "3か月だけ先に拾って、起算点が抜けていそうです。",
+      hypothesis: "数字先行で起算点が薄い",
       confidence_after: 0.78,
       influenced_by: []
     },
@@ -185,41 +188,45 @@ function getMockEvents(memorySummary?: MemorySummary | null): DeliberationEvent[
       speaker: "memory",
       speaker_label: speakerLabels.memory,
       type: "challenge",
+      dialogue_move: "add_detail",
       message: getMemoryChallengeMessage(memorySummary),
-      hypothesis: "前回と同じ読み方が再発する可能性",
+      hypothesis: "覚えている数字が先に出ている",
       confidence_after: 0.71,
-      influenced_by: ["misconception"]
+      influenced_by: ["reading"]
     },
     {
       round: 2,
-      speaker: "misconception",
-      speaker_label: speakerLabels.misconception,
+      speaker: "law",
+      speaker_label: speakerLabels.law,
       type: "revision",
-      message: "それなら結論より先に、肢ごとの根拠を見たい。",
-      hypothesis: "一括回答より肢別観察が有効",
+      dialogue_move: "update_hypothesis",
+      message: "ただ、数字だけでは足りません。法的効果までつなぎたいです。",
+      hypothesis: "起算点と法的効果の接続不足",
       confidence_before: 0.78,
       confidence_after: 0.73,
       influenced_by: ["memory"]
     },
     {
       round: 3,
-      speaker: "load",
-      speaker_label: speakerLabels.load,
+      speaker: "pattern",
+      speaker_label: speakerLabels.pattern,
       type: "recommendation",
-      message: "正誤をすぐ教えず、短い理由だけ取るのが軽い。",
-      hypothesis: "1肢ずつ観察した方が負荷が低い",
+      dialogue_move: "connect_previous",
+      message: "前も起算点で迷っていました。同じ型として扱えそうです。",
+      hypothesis: "起算点の迷いが再発している",
       confidence_after: 0.88,
-      influenced_by: ["misconception", "memory"]
+      influenced_by: ["reading", "memory", "law"]
     },
     {
       round: 4,
       speaker: "coach",
       speaker_label: speakerLabels.coach,
       type: "coach_decision",
-      message: "まずは肢ごとの判断過程を観察しよう。",
-      hypothesis: "結論より思考過程を先に見る",
+      dialogue_move: "add_detail",
+      message: "では起算点から聞きます。ここがいちばん早そうです。",
+      hypothesis: "起算点確認が先",
       confidence_after: 0.86,
-      influenced_by: ["misconception", "memory", "load"]
+      influenced_by: ["reading", "memory", "law", "pattern"]
     }
   ];
 }
