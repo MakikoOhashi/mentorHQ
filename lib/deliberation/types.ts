@@ -1,12 +1,12 @@
 export type AgentId = "reading" | "law" | "memory" | "pattern" | "review" | "coach";
 
 export const DIALOGUE_MOVES = [
+  "observe",
   "agree",
-  "disagree",
-  "add_detail",
-  "raise_hypothesis",
+  "challenge",
+  "extend",
+  "recall",
   "update_hypothesis",
-  "connect_previous",
   "defer"
 ] as const;
 

@@ -20,6 +20,12 @@ const SPEAKER_LABELS: Record<CoachConversationSpeaker, string> = {
   review: "Review"
 };
 
+type TurnDraft = {
+  speaker: CoachConversationSpeaker;
+  dialogueMove: DialogueMove;
+  text: string;
+};
+
 function quoteReason(reason: string | null): string | null {
   const trimmed = reason?.trim();
   if (!trimmed) {
@@ -135,25 +141,25 @@ function findRecentRelatedObservation(
 function buildReadingTurn(
   observation: ObservationEvent,
   previousInQuestion: ObservationEvent | null
-): { speaker: CoachConversationSpeaker; dialogueMove: DialogueMove; text: string } {
+): TurnDraft {
   const reasonQuote = quoteReason(observation.learner_reason);
 
   if (observation.misunderstanding_type === "starting_point_confusion") {
     return {
       speaker: "reading",
-      dialogueMove: "raise_hypothesis",
+      dialogueMove: "observe",
       text: reasonQuote
-        ? `${reasonQuote} と置いていますね。起算点をそのまま受け取っています。`
-        : "ここは起算点をそのまま受け取っています。"
+        ? `${reasonQuote} が先です。起算点をそのまま置いています。`
+        : "ここは起算点をそのまま置いています。"
     };
   }
 
   if (observation.misunderstanding_type === "condition_omission") {
     return {
       speaker: "reading",
-      dialogueMove: "raise_hypothesis",
+      dialogueMove: "observe",
       text: reasonQuote
-        ? `${reasonQuote} が先に出ています。条件句が根拠から落ちています。`
+        ? `${reasonQuote} が先です。条件句が根拠から落ちています。`
         : "条件句が根拠から落ちています。"
     };
   }
@@ -161,10 +167,10 @@ function buildReadingTurn(
   if (observation.reasoning_style === "condition_based") {
     return {
       speaker: "reading",
-      dialogueMove: "agree",
+      dialogueMove: "observe",
       text: reasonQuote
-        ? `${reasonQuote} という理由づけです。今回は条件から入れていますね。`
-        : "今回は条件から入れていますね。"
+        ? `${reasonQuote} という理由です。今回は条件から入れています。`
+        : "今回は条件から入れています。"
     };
   }
 
@@ -172,15 +178,15 @@ function buildReadingTurn(
     return {
       speaker: "reading",
       dialogueMove: "update_hypothesis",
-      text: "さっきとは入り方が違います。読みの軸が切り替わっています。"
+      text: "さっきとは入り方が違います。読む軸が切り替わっています。"
     };
   }
 
   return {
     speaker: "reading",
-    dialogueMove: "add_detail",
+    dialogueMove: "observe",
     text: reasonQuote
-      ? `${reasonQuote} が先に立っています。決め手より印象で進んでいます。`
+      ? `${reasonQuote} が先に立っています。決め手より印象が先です。`
       : "決め手より印象で進んでいます。"
   };
 }
@@ -188,28 +194,28 @@ function buildReadingTurn(
 function buildLawTurn(
   observation: ObservationEvent,
   previousInQuestion: ObservationEvent | null
-): { speaker: CoachConversationSpeaker; dialogueMove: DialogueMove; text: string } {
+): TurnDraft {
   if (observation.misunderstanding_type === "starting_point_confusion") {
     return {
       speaker: "law",
-      dialogueMove: "add_detail",
-      text: "その読みだと開始前の扱いまで広がってしまいます。時点理解のずれが強そうです。"
+      dialogueMove: "challenge",
+      text: "その読みだと開始前まで広がります。時点理解が少し危ないです。"
     };
   }
 
   if (observation.correct_or_wrong === "wrong" && observation.reasoning_style === "condition_based") {
     return {
       speaker: "law",
-      dialogueMove: "disagree",
-      text: "その線なら要件は拾えています。ただ、結論に必要な法的効果が一段抜けています。"
+      dialogueMove: "challenge",
+      text: "その線でも要件止まりです。法的効果までまだ届いていません。"
     };
   }
 
   if (observation.correct_or_wrong === "wrong" && observation.reasoning_style === "memory_based") {
     return {
       speaker: "law",
-      dialogueMove: "add_detail",
-      text: "知識はありますが、条文の仕組みとしてはまだつながっていません。"
+      dialogueMove: "extend",
+      text: "知識はありますね。ただ、条文の仕組みまではつながっていません。"
     };
   }
 
@@ -225,30 +231,26 @@ function buildLawTurn(
     return {
       speaker: "law",
       dialogueMove: "update_hypothesis",
-      text: "今回は正誤の切り分け方が動いています。単なる読み違いだけではなさそうです。"
+      text: "今回は正誤の切り分けが動いています。読み違いだけではなさそうです。"
     };
   }
 
   return {
     speaker: "law",
-    dialogueMove: "raise_hypothesis",
+    dialogueMove: "challenge",
     text: "制度のどこで効力が変わるか、その接続がまだ弱いです。"
   };
 }
 
-function buildMemoryTurn(observation: ObservationEvent): {
-  speaker: CoachConversationSpeaker;
-  dialogueMove: DialogueMove;
-  text: string;
-} {
+function buildMemoryTurn(observation: ObservationEvent): TurnDraft {
   const reasonQuote = quoteReason(observation.learner_reason);
 
   if (observation.reasoning_style === "memory_based") {
     return {
       speaker: "memory",
-      dialogueMove: "add_detail",
+      dialogueMove: "observe",
       text: reasonQuote
-        ? `理由は ${reasonQuote} です。知識はありますが、根拠としてはまだ薄いです。`
+        ? `理由は ${reasonQuote} です。知識先行で、根拠としてはまだ薄いです。`
         : "知識はありますが、根拠としてはまだ薄いです。"
     };
   }
@@ -256,8 +258,8 @@ function buildMemoryTurn(observation: ObservationEvent): {
   if (observation.reasoning_style === "uncertainty") {
     return {
       speaker: "memory",
-      dialogueMove: "raise_hypothesis",
-      text: "根拠がまだ浮いています。知識不足というより判断の置き場が定まっていません。"
+      dialogueMove: "challenge",
+      text: "根拠がまだ浮いています。知識不足より判断の置き場が定まっていません。"
     };
   }
 
@@ -265,21 +267,21 @@ function buildMemoryTurn(observation: ObservationEvent): {
     return {
       speaker: "memory",
       dialogueMove: "agree",
-      text: "理由は言葉になっています。暗記より理解ベースで再現できそうです。"
+      text: "理由は言葉になっています。暗記だけで押してはいなさそうです。"
     };
   }
 
   return {
     speaker: "memory",
     dialogueMove: "defer",
-    text: "まだ知識不足とは言い切れません。判断の速さが先に出た可能性を残します。"
+    text: "まだ知識不足とは言い切れません。判断の速さが先かもしれません。"
   };
 }
 
 function buildPatternTurn(
   observation: ObservationEvent,
   relatedObservation: ObservationEvent | null
-): { speaker: CoachConversationSpeaker; dialogueMove: DialogueMove; text: string } | null {
+): TurnDraft | null {
   if (!relatedObservation) {
     return null;
   }
@@ -288,7 +290,7 @@ function buildPatternTurn(
     if (observation.misunderstanding_type === "starting_point_confusion") {
       return {
         speaker: "pattern",
-        dialogueMove: "connect_previous",
+        dialogueMove: "recall",
         text: "前の肢でも時点で揺れていました。今日の迷い方がここでつながります。"
       };
     }
@@ -296,7 +298,7 @@ function buildPatternTurn(
     if (observation.misunderstanding_type === "condition_omission") {
       return {
         speaker: "pattern",
-        dialogueMove: "connect_previous",
+        dialogueMove: "recall",
         text: "前の肢でも条件が薄かったです。今回も同じ落とし方です。"
       };
     }
@@ -305,7 +307,7 @@ function buildPatternTurn(
   if (relatedObservation.reasoning_style === observation.reasoning_style) {
     return {
       speaker: "pattern",
-      dialogueMove: "connect_previous",
+      dialogueMove: "recall",
       text: "今日の中で同じ入り方が続いています。判断軸が固定されています。"
     };
   }
@@ -313,7 +315,7 @@ function buildPatternTurn(
   return {
     speaker: "pattern",
     dialogueMove: "update_hypothesis",
-    text: "前の肢とは少し違います。今回は迷い方の軸が制度理解側へ寄っています。"
+    text: "前の肢とは少し違います。今回は迷い方が制度理解側へ寄っています。"
   };
 }
 
@@ -321,7 +323,7 @@ function buildReviewTurn(
   observation: ObservationEvent,
   previousInQuestion: ObservationEvent | null,
   relatedObservation: ObservationEvent | null
-): { speaker: CoachConversationSpeaker; dialogueMove: DialogueMove; text: string } {
+): TurnDraft {
   const updatedHypothesis = getUpdatedHypothesis(observation, previousInQuestion, relatedObservation);
 
   if (relatedObservation || previousInQuestion) {
@@ -342,8 +344,8 @@ function buildReviewTurn(
 
   return {
     speaker: "review",
-    dialogueMove: "agree",
-    text: `この肢は良い材料です。${getUpdatedHypothesis(observation, previousInQuestion, relatedObservation)}`
+    dialogueMove: "extend",
+    text: `この肢は良い材料です。${updatedHypothesis}`
   };
 }
 
@@ -354,26 +356,92 @@ function buildTurnsForObservation(
   const observation = observations[currentIndex];
   const previousInQuestion = findPreviousQuestionObservation(observations, currentIndex);
   const relatedObservation = findRecentRelatedObservation(observations, currentIndex);
-  const turns: Array<{ speaker: CoachConversationSpeaker; dialogueMove: DialogueMove; text: string }> = [];
-
-  turns.push(buildReadingTurn(observation, previousInQuestion));
-  turns.push(buildLawTurn(observation, previousInQuestion));
-
+  const readingTurn = buildReadingTurn(observation, previousInQuestion);
+  const lawTurn = buildLawTurn(observation, previousInQuestion);
+  const memoryTurn = buildMemoryTurn(observation);
   const patternTurn = buildPatternTurn(observation, relatedObservation);
-  let hasMemoryTurn = false;
+  const reviewTurn = buildReviewTurn(observation, previousInQuestion, relatedObservation);
+  const turns: TurnDraft[] = [];
 
-  if (patternTurn && (relatedObservation || previousInQuestion)) {
+  const samePattern =
+    relatedObservation &&
+    relatedObservation.misunderstanding_type === observation.misunderstanding_type;
+  const longReason = (observation.learner_reason ?? "").trim().length >= 22;
+  const needsLawPush =
+    observation.correct_or_wrong === "wrong" ||
+    observation.misunderstanding_type === "starting_point_confusion" ||
+    observation.misunderstanding_type === "condition_omission";
+
+  if (samePattern && patternTurn) {
     turns.push(patternTurn);
+    turns.push({
+      speaker: "reading",
+      dialogueMove: "agree",
+      text:
+        observation.misunderstanding_type === "starting_point_confusion"
+          ? "たしかに。今回も読み出しで時点がずれています。"
+          : "たしかに。今回も条件より先に結論へ寄っています。"
+    });
+
+    if (needsLawPush) {
+      turns.push(lawTurn);
+    }
+
+    turns.push({
+      speaker: "review",
+      dialogueMove: "defer",
+      text: `まだ決め切らず、${getUpdatedHypothesis(observation, previousInQuestion, relatedObservation)}`
+    });
+  } else if (observation.reasoning_style === "memory_based" || longReason) {
+    turns.push(memoryTurn);
+    turns.push({
+      speaker: "reading",
+      dialogueMove: observation.reasoning_style === "memory_based" ? "agree" : "extend",
+      text:
+        observation.reasoning_style === "memory_based"
+          ? "たしかに。読む前に答えの形を置きにいっています。"
+          : "その理由なら、読む順番もかなり崩れてはいません。"
+    });
+
+    if (needsLawPush) {
+      turns.push(lawTurn);
+    } else if (patternTurn) {
+      turns.push(patternTurn);
+    }
+
+    turns.push({
+      speaker: "review",
+      dialogueMove: observation.reasoning_style === "memory_based" ? "defer" : reviewTurn.dialogueMove,
+      text:
+        observation.reasoning_style === "memory_based"
+          ? "まだ暗記寄りと決め切らず、次の肢も見ておきたいです。"
+          : reviewTurn.text
+    });
+  } else if (observation.reasoning_style === "condition_based" && observation.correct_or_wrong === "correct") {
+    turns.push(readingTurn);
+    turns.push(lawTurn);
+
+    if (patternTurn) {
+      turns.push(patternTurn);
+    }
+
+    turns.push({
+      speaker: "reading",
+      dialogueMove: "update_hypothesis",
+      text: "今回は読み違いより、判断基準が安定してきています。"
+    });
   } else {
-    turns.push(buildMemoryTurn(observation));
-    hasMemoryTurn = true;
-  }
+    turns.push(readingTurn);
+    turns.push(lawTurn);
 
-  if (!hasMemoryTurn && (observation.reasoning_style === "memory_based" || observation.reasoning_style === "uncertainty")) {
-    turns.push(buildMemoryTurn(observation));
-  }
+    if (observation.reasoning_style === "uncertainty") {
+      turns.push(memoryTurn);
+    } else if (patternTurn) {
+      turns.push(patternTurn);
+    }
 
-  turns.push(buildReviewTurn(observation, previousInQuestion, relatedObservation));
+    turns.push(reviewTurn);
+  }
 
   return turns.slice(0, 5).map((turn, index) => ({
     id: `${observation.id}-${turn.speaker}-${turn.dialogueMove}-${index}`,
