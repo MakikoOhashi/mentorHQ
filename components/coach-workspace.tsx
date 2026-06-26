@@ -527,6 +527,25 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       <section className="device-layout">
         <article className="phone-frame">
           <div className="device-scroll-shell">
+            <div className="simulator-status-bar phone-simulator-status" aria-hidden="true">
+              <span className="simulator-time">9:41</span>
+              <div className="simulator-status-icons">
+                <span className="simulator-signal">
+                  <i />
+                  <i />
+                  <i />
+                  <i />
+                </span>
+                <span className="simulator-wifi">
+                  <i />
+                  <i />
+                  <i />
+                </span>
+                <span className="simulator-battery">
+                  <span className="simulator-battery-level" />
+                </span>
+              </div>
+            </div>
             <div className="phone-chrome">
               <div className="phone-menu-wrap">
                 <button
@@ -907,6 +926,26 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
 
         <article className="tablet-frame">
           <div className="device-scroll-shell coach-scroll-shell">
+            <div className="simulator-status-bar tablet-simulator-status" aria-hidden="true">
+              <span className="simulator-time">9:41</span>
+              <span className="tablet-status-title">AI Coach Mind</span>
+              <div className="simulator-status-icons">
+                <span className="simulator-signal">
+                  <i />
+                  <i />
+                  <i />
+                  <i />
+                </span>
+                <span className="simulator-wifi">
+                  <i />
+                  <i />
+                  <i />
+                </span>
+                <span className="simulator-battery">
+                  <span className="simulator-battery-level" />
+                </span>
+              </div>
+            </div>
             <div className="panel-heading tight observation-stream-heading">
               <div>
                 <span className="panel-kicker">AI Coach Mind</span>
