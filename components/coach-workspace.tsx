@@ -51,7 +51,7 @@ type FinalResult = {
   summary: string;
 };
 
-const MAX_VISIBLE_THOUGHTS = 18;
+const MAX_VISIBLE_THOUGHTS = 12;
 const THOUGHT_REVEAL_DELAY_MS = 280;
 
 const STEP_ORDER: LearnerStep[] = [
