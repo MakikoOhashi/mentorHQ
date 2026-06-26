@@ -164,7 +164,7 @@ export function getLearnerCaseByQuestionId(questionId: string): LearnerCase | nu
 
 function getMemoryChallengeMessage(memorySummary?: MemorySummary | null): string {
   if (!memorySummary) {
-    return "前も数字を先に見ていたし、今回もそこから入りそう。";
+    return "理由: 「3か月」";
   }
 
   return memorySummary.memoryMessageHint;
@@ -178,7 +178,7 @@ function getMockEvents(memorySummary?: MemorySummary | null): DeliberationEvent[
       speaker_label: speakerLabels.reading,
       type: "observation",
       dialogue_move: "observe",
-      message: "3か月だけ先に拾って、起算点が抜けていそうです。",
+      message: "数字優先",
       hypothesis: "数字先行で起算点が薄い",
       confidence_after: 0.78,
       influenced_by: []
@@ -200,7 +200,7 @@ function getMockEvents(memorySummary?: MemorySummary | null): DeliberationEvent[
       speaker_label: speakerLabels.law,
       type: "revision",
       dialogue_move: "update_hypothesis",
-      message: "ただ、数字だけでは足りません。法的効果までつなぎたいです。",
+      message: "開始時点?",
       hypothesis: "起算点と法的効果の接続不足",
       confidence_before: 0.78,
       confidence_after: 0.73,
@@ -212,7 +212,7 @@ function getMockEvents(memorySummary?: MemorySummary | null): DeliberationEvent[
       speaker_label: speakerLabels.pattern,
       type: "recommendation",
       dialogue_move: "recall",
-      message: "前も起算点で迷っていました。同じ型として扱えそうです。",
+      message: "前問類似",
       hypothesis: "起算点の迷いが再発している",
       confidence_after: 0.88,
       influenced_by: ["reading", "memory", "law"]
@@ -223,7 +223,7 @@ function getMockEvents(memorySummary?: MemorySummary | null): DeliberationEvent[
       speaker_label: speakerLabels.coach,
       type: "coach_decision",
       dialogue_move: "extend",
-      message: "では起算点から聞きます。ここがいちばん早そうです。",
+      message: "起算点確認へ",
       hypothesis: "起算点確認が先",
       confidence_after: 0.86,
       influenced_by: ["reading", "memory", "law", "pattern"]
