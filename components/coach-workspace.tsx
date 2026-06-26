@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { buildCoachConversation } from "@/lib/deliberation/coach-conversation";
 import { buildStatementObservationInput } from "@/lib/deliberation/observation";
 import type {
   DailyReview,
@@ -50,13 +51,8 @@ type FinalResult = {
   summary: string;
 };
 
-type CoachThought = {
-  id: string;
-  channel: "reading" | "law" | "memory" | "review";
-  text: string;
-  created_at: string | null;
-  source_observation_id: string;
-};
+const MAX_VISIBLE_THOUGHTS = 18;
+const THOUGHT_REVEAL_DELAY_MS = 280;
 
 const STEP_ORDER: LearnerStep[] = [
   "morning",
@@ -141,123 +137,6 @@ function getQuestionPhaseFromObservations(learnerCase: LearnerCase | null, quest
   return "final";
 }
 
-function buildReasonObservation(reason: string | null) {
-  const trimmed = reason?.trim();
-  if (!trimmed) {
-    return "理由はまだ短めです。次の肢でも迷い方を見ます。";
-  }
-
-  if (trimmed.length <= 14) {
-    return "理由は短めです。根拠が言葉になるか見ます。";
-  }
-
-  return `「${trimmed}」と見ています。`;
-}
-
-function buildReadingThought(observation: ObservationEvent): string {
-  if (observation.reasoning_style === "condition_based") {
-    return "条件句を追えています。起点のズレだけ見ます。";
-  }
-
-  if (observation.reasoning_style === "memory_based") {
-    return "数字や語句が先です。前提条件まで拾えているか見ます。";
-  }
-
-  if (observation.reasoning_style === "uncertainty") {
-    return "まだ読みの軸が薄いです。条件句に戻せるか見ます。";
-  }
-
-  return "まず印象で入っています。読み直しが入るか見ます。";
-}
-
-function buildLawThought(observation: ObservationEvent): string {
-  if (observation.correct_or_wrong === "wrong" && observation.reasoning_style === "condition_based") {
-    return "要件は追えています。決め手の条件が少しずれています。";
-  }
-
-  if (observation.correct_or_wrong === "wrong" && observation.reasoning_style === "memory_based") {
-    return "知識はあります。条文への当てはめがまだ浅いです。";
-  }
-
-  if (observation.correct_or_wrong === "correct") {
-    return "この肢は制度理解で支えられています。理由の再現性を見ます。";
-  }
-
-  return "ここはまだ保留です。同じ判断軸が続くか見ます。";
-}
-
-function buildMemoryThought(observation: ObservationEvent): string {
-  if (observation.reasoning_style === "memory_based") {
-    return "覚えている要素は出ています。単発暗記で止まらないか見ます。";
-  }
-
-  if (observation.reasoning_style === "condition_based") {
-    return "暗記より構造で見ています。再現できる説明か見ます。";
-  }
-
-  if (observation.reasoning_style === "uncertainty") {
-    return "記憶の手がかりが弱いです。言い切れない感触が残っています。";
-  }
-
-  return "まだ勘寄りです。理由があとから乗るか見ます。";
-}
-
-function buildReviewThought(observation: ObservationEvent): string {
-  if (observation.correct_or_wrong === "wrong") {
-    return "今日のレビュー候補: この肢の判断軸。";
-  }
-
-  if (observation.reasoning_style === "uncertainty") {
-    return "正誤より迷い方をレビューで拾います。";
-  }
-
-  return "まだ結論にはしません。次の肢まで流れを見ます。";
-}
-
-function buildCoachThoughtsForObservation(observation: ObservationEvent): CoachThought[] {
-  const thoughts: CoachThought[] = [
-    {
-      id: `${observation.id}-reading`,
-      channel: "reading",
-      text: buildReadingThought(observation),
-      created_at: observation.created_at,
-      source_observation_id: observation.id
-    },
-    {
-      id: `${observation.id}-law`,
-      channel: "law",
-      text: buildLawThought(observation),
-      created_at: observation.created_at,
-      source_observation_id: observation.id
-    },
-    {
-      id: `${observation.id}-memory`,
-      channel: "memory",
-      text: buildMemoryThought(observation),
-      created_at: observation.created_at,
-      source_observation_id: observation.id
-    },
-    {
-      id: `${observation.id}-review`,
-      channel: "review",
-      text: buildReviewThought(observation),
-      created_at: observation.created_at,
-      source_observation_id: observation.id
-    }
-  ];
-
-  if (observation.learner_reason?.trim()) {
-    thoughts.splice(2, 0, {
-      id: `${observation.id}-reason`,
-      channel: "reading",
-      text: buildReasonObservation(observation.learner_reason),
-      created_at: observation.created_at,
-      source_observation_id: observation.id
-    });
-  }
-
-  return thoughts.slice(0, 4);
-}
 
 export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const [learnerCase, setLearnerCase] = useState(initialCase);
@@ -281,7 +160,6 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const [finalResult, setFinalResult] = useState<FinalResult | null>(null);
   const [queuedNextPayload, setQueuedNextPayload] = useState<DailySessionPayload | null>(null);
   const [visibleThoughtIds, setVisibleThoughtIds] = useState<string[]>([]);
-  const coachMindViewportRef = useRef<HTMLDivElement | null>(null);
   const revealTimeoutIdsRef = useRef<number[]>([]);
 
   const applyDailySessionPayload = useCallback((payload: DailySessionPayload) => {
@@ -358,20 +236,20 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     [currentQuestionId, observations]
   );
 
-  const coachThoughts = useMemo(
-    () => observations.flatMap((observation) => buildCoachThoughtsForObservation(observation)),
-    [observations]
+  const coachConversation = useMemo(() => buildCoachConversation(observations), [observations]);
+  const visibleTurns = useMemo(
+    () => coachConversation.filter((turn) => visibleThoughtIds.includes(turn.id)),
+    [coachConversation, visibleThoughtIds]
   );
+  const isCoachThinking =
+    sessionActionStatus !== "idle" || reviewActionStatus === "generating" || planActionStatus === "generating";
 
   useEffect(() => {
-    const nextIds = coachThoughts.map((thought) => thought.id);
+    const nextIds = coachConversation.map((turn) => turn.id);
 
     setVisibleThoughtIds((current) => {
-      if (nextIds.length === 0) {
-        return [];
-      }
-
-      const knownIds = new Set(current);
+      const retainedIds = current.filter((id) => nextIds.includes(id)).slice(-MAX_VISIBLE_THOUGHTS);
+      const knownIds = new Set(retainedIds);
       const appendedIds = nextIds.filter((id) => !knownIds.has(id));
 
       revealTimeoutIdsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
@@ -379,32 +257,26 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
 
       appendedIds.forEach((id, index) => {
         const timeoutId = window.setTimeout(() => {
-          setVisibleThoughtIds((visible) => (visible.includes(id) ? visible : [...visible, id]));
-        }, index * 400);
+          setVisibleThoughtIds((visible) => {
+            if (visible.includes(id)) {
+              return visible;
+            }
+
+            return [...visible, id].slice(-MAX_VISIBLE_THOUGHTS);
+          });
+        }, index * THOUGHT_REVEAL_DELAY_MS);
 
         revealTimeoutIdsRef.current.push(timeoutId);
       });
 
-      return current.filter((id) => nextIds.includes(id));
+      return retainedIds;
     });
 
     return () => {
       revealTimeoutIdsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
       revealTimeoutIdsRef.current = [];
     };
-  }, [coachThoughts]);
-
-  useEffect(() => {
-    const viewport = coachMindViewportRef.current;
-    if (!viewport) {
-      return;
-    }
-
-    viewport.scrollTo({
-      top: viewport.scrollHeight,
-      behavior: "smooth"
-    });
-  }, [visibleThoughtIds]);
+  }, [coachConversation]);
 
   useEffect(() => {
     if (!currentQuestionId || dailySession?.status === "completed" || queuedNextPayload || finalResult) {
@@ -1038,39 +910,38 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
             <div className="panel-heading tight observation-stream-heading">
               <div>
                 <span className="panel-kicker">AI Coach Mind</span>
-                <h3>thinking...</h3>
-                <p className="device-caption">裏側のログだけを流します。</p>
+                <h3>Live Thought Stream</h3>
+                <p className="device-caption">仮説が少しずつ更新されるライブ会話です。</p>
               </div>
-              <span className="observation-count-pill">
-                {dailySession ? `${coachThoughts.length} thoughts` : "0 thoughts"}
-              </span>
+              <div className="thought-stream-meta">
+                <span className={`thinking-pill ${isCoachThinking ? "is-active" : ""}`}>Thinking...</span>
+                <span className="observation-count-pill">
+                  {dailySession ? `${visibleTurns.length}/${MAX_VISIBLE_THOUGHTS}` : `0/${MAX_VISIBLE_THOUGHTS}`}
+                </span>
+              </div>
             </div>
 
-            <div className="observation-stream-viewport" ref={coachMindViewportRef}>
+            <div className="observation-stream-viewport">
               <div className="observation-list coach-thought-list">
-                {coachThoughts.length === 0 ? (
+                {visibleTurns.length === 0 ? (
                   <div className="observation-empty-state">
-                    <p>thinking...</p>
-                    <p>肢の回答後にログが流れます。</p>
+                    <p>Thinking...</p>
+                    <p>肢の回答後にライブ会話が始まります。</p>
                   </div>
                 ) : (
-                  coachThoughts
-                    .filter((thought) => visibleThoughtIds.includes(thought.id))
-                    .map((thought, index, visibleThoughts) => {
+                  visibleTurns.map((turn, index) => {
                       const isLatestThought =
-                        thought.source_observation_id === latestObservation?.id && index === visibleThoughts.length - 1;
+                        turn.source_observation_id === latestObservation?.id && index === visibleTurns.length - 1;
 
                       return (
                         <section
                           className={`mind-entry chat-row ${
                             isLatestThought ? "is-latest-observation" : ""
-                          } stream-depth-${Math.min(visibleThoughts.length - 1 - index, 4)}`}
-                          key={thought.id}
+                          } stream-depth-${Math.min(visibleTurns.length - 1 - index, 4)}`}
+                          key={turn.id}
                         >
-                          <p className="mind-log-line">
-                            <span className="mind-log-channel">[{thought.channel}]</span>
-                            <span>{thought.text}</span>
-                          </p>
+                          <p className="mind-log-speaker">{turn.speakerLabel}</p>
+                          <p className="mind-log-line">{turn.text}</p>
                         </section>
                       );
                     })

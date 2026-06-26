@@ -365,19 +365,66 @@ blockquote {
   margin-top: 14px;
   padding: 12px 14px;
   height: 520px;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: hidden;
   border-radius: 18px;
   border: 1px solid rgba(23, 32, 51, 0.08);
   background:
     linear-gradient(180deg, rgba(250, 249, 245, 0.96), rgba(255, 255, 255, 0.88)),
     rgba(255, 255, 255, 0.82);
-  scroll-behavior: smooth;
 }
 
 .observation-list {
   display: grid;
   gap: 0;
+  height: 100%;
+}
+
+.coach-thought-list {
+  align-content: end;
+  align-items: end;
+  justify-items: stretch;
+  overflow: hidden;
+}
+
+.thought-stream-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.thinking-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(23, 32, 51, 0.08);
+  background: rgba(255, 255, 255, 0.82);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #67748a;
+}
+
+.thinking-pill::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #a9b5c7;
+  transition: transform 160ms ease, background-color 160ms ease;
+}
+
+.thinking-pill.is-active::before {
+  background: #3158d3;
+  transform: scale(1.12);
+}
+
+.thinking-pill.is-active {
+  color: #243149;
+  border-color: rgba(49, 88, 211, 0.18);
+  background: rgba(49, 88, 211, 0.08);
 }
 
 .coach-thought-list {
@@ -386,11 +433,11 @@ blockquote {
 }
 
 .observation-empty-state {
-  min-height: 300px;
+  min-height: 100%;
   display: grid;
-  place-content: center;
+  align-content: end;
   gap: 6px;
-  padding: 24px;
+  padding: 24px 12px 12px;
   text-align: left;
   border-left: 1px solid rgba(23, 32, 51, 0.08);
   background: transparent;
@@ -1286,30 +1333,47 @@ blockquote {
 }
 
 .mind-entry + .mind-entry {
-  margin-top: 2px;
+  margin-top: 10px;
 }
 
 .mind-entry {
-  padding: 5px 0 5px 12px;
+  padding: 4px 0 0 14px;
   border-left: 1px solid rgba(23, 32, 51, 0.08);
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 220ms ease, transform 220ms ease;
+}
+
+.mind-log-speaker {
+  margin: 0 0 4px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #6f7a8e;
+  text-transform: uppercase;
 }
 
 .mind-log-line {
   margin: 0;
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-  font-family:
-    "SFMono-Regular", "SF Mono", "IBM Plex Mono", "JetBrains Mono", ui-monospace, monospace;
-  font-size: 0.82rem;
-  line-height: 1.45;
+  font-size: 0.95rem;
+  line-height: 1.65;
   color: #243149;
 }
 
-.mind-log-channel {
-  flex: 0 0 auto;
-  color: #51607a;
-  text-transform: lowercase;
+.stream-depth-4 {
+  opacity: 0.44;
+}
+
+.stream-depth-3 {
+  opacity: 0.56;
+}
+
+.stream-depth-2 {
+  opacity: 0.72;
+}
+
+.stream-depth-1 {
+  opacity: 0.86;
 }
 
 .is-latest-observation .mind-log-line {
