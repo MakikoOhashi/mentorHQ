@@ -309,12 +309,12 @@ blockquote {
 .observation-count-pill {
   display: inline-flex;
   align-items: center;
-  border: 1px solid #d8ddf6;
-  background: #f7f8ff;
-  color: var(--accent);
+  border: 1px solid rgba(108, 106, 98, 0.2);
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--muted);
   border-radius: 999px;
-  padding: 6px 10px;
-  font-size: 0.74rem;
+  padding: 4px 8px;
+  font-size: 0.68rem;
   font-weight: 700;
   white-space: nowrap;
 }
@@ -362,22 +362,22 @@ blockquote {
 }
 
 .observation-stream-viewport {
-  margin-top: 18px;
-  padding: 10px;
+  margin-top: 14px;
+  padding: 12px 14px;
   height: 520px;
   overflow-y: auto;
   overflow-x: hidden;
-  border-radius: 22px;
-  border: 1px solid rgba(233, 226, 211, 0.85);
+  border-radius: 18px;
+  border: 1px solid rgba(23, 32, 51, 0.08);
   background:
-    linear-gradient(180deg, rgba(248, 246, 239, 0.92), rgba(255, 255, 255, 0.82)),
-    rgba(255, 255, 255, 0.78);
+    linear-gradient(180deg, rgba(250, 249, 245, 0.96), rgba(255, 255, 255, 0.88)),
+    rgba(255, 255, 255, 0.82);
   scroll-behavior: smooth;
 }
 
 .observation-list {
   display: grid;
-  gap: 12px;
+  gap: 0;
 }
 
 .coach-thought-list {
@@ -389,92 +389,17 @@ blockquote {
   min-height: 300px;
   display: grid;
   place-content: center;
-  gap: 8px;
+  gap: 6px;
   padding: 24px;
-  text-align: center;
-  border: 1px dashed var(--border);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.72);
+  text-align: left;
+  border-left: 1px solid rgba(23, 32, 51, 0.08);
+  background: transparent;
 }
 
 .observation-empty-state p,
 .observation-meta-row span {
   margin: 0;
   color: var(--muted);
-}
-
-.observation-row {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 12px;
-  align-items: start;
-}
-
-.observation-icon {
-  width: 40px;
-  height: 40px;
-  display: grid;
-  place-items: center;
-  border-radius: 14px;
-  background: #f5f6fb;
-  border: 1px solid #e3e6f5;
-  font-size: 1.1rem;
-}
-
-.observation-bubble {
-  padding: 14px 16px;
-  border-radius: 18px 18px 18px 8px;
-  border: 1px solid var(--border);
-  background: #fffdfa;
-  transition:
-    opacity 260ms ease,
-    border-color 260ms ease,
-    box-shadow 260ms ease,
-    transform 260ms ease,
-    filter 260ms ease;
-}
-
-.thought-bubble {
-  background: linear-gradient(180deg, #fffef9, #ffffff);
-}
-
-.thought-meta-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.thought-coach-name {
-  font-size: 0.84rem;
-  font-weight: 800;
-  color: #35567a;
-}
-
-.observation-meta-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
-}
-
-.observation-meta-row span {
-  font-size: 0.74rem;
-  padding: 4px 8px;
-  border-radius: 999px;
-  background: var(--surface-soft);
-}
-
-.is-latest-observation .observation-bubble {
-  background: linear-gradient(180deg, #f5fbf6, #ffffff);
-  border-color: #cae4d0;
-  box-shadow: 0 16px 34px rgba(31, 119, 87, 0.1);
-  transform: translateY(-1px) scale(1.01);
-}
-
-.is-latest-observation .observation-icon {
-  background: linear-gradient(180deg, #eef8f2, #f9fcfa);
-  border-color: #cfe4d8;
 }
 
 .daily-review-panel {
@@ -1361,14 +1286,54 @@ blockquote {
 }
 
 .mind-entry + .mind-entry {
-  margin-top: 14px;
+  margin-top: 2px;
 }
 
-.mind-entry-time {
-  margin-bottom: 8px;
-  color: var(--muted);
-  font-size: 0.78rem;
-  font-weight: 700;
+.mind-entry {
+  padding: 5px 0 5px 12px;
+  border-left: 1px solid rgba(23, 32, 51, 0.08);
+}
+
+.mind-log-line {
+  margin: 0;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-family:
+    "SFMono-Regular", "SF Mono", "IBM Plex Mono", "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: #243149;
+}
+
+.mind-log-channel {
+  flex: 0 0 auto;
+  color: #51607a;
+  text-transform: lowercase;
+}
+
+.is-latest-observation .mind-log-line {
+  color: #172033;
+}
+
+.stream-depth-0 .mind-log-line {
+  opacity: 1;
+}
+
+.stream-depth-1 .mind-log-line {
+  opacity: 0.86;
+}
+
+.stream-depth-2 .mind-log-line {
+  opacity: 0.7;
+}
+
+.stream-depth-3 .mind-log-line {
+  opacity: 0.54;
+}
+
+.stream-depth-4 .mind-log-line {
+  opacity: 0.38;
 }
 
 .device-caption {
