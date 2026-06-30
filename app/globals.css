@@ -938,9 +938,9 @@ blockquote {
   border-radius: 34px;
   border: 1px solid #bcc5d2;
   background: linear-gradient(180deg, #e6ebf2, #cfd6e0 62%, #c2cad6);
-  box-shadow:
+  /* box-shadow:
     0 22px 48px rgba(38, 48, 68, 0.13),
-    inset 0 1px 0 rgba(255, 255, 255, 0.65);
+    inset 0 1px 0 rgba(255, 255, 255, 0.65); */
   overflow: hidden;
   flex: 1 1 auto;
 }
