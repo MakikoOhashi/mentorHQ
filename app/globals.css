@@ -917,7 +917,7 @@ blockquote {
 .phone-frame {
   width: 338px;
   height: min(720px, calc(100vh - 48px));
-  padding: 10px;
+  padding: 1px;
   border-radius: 44px;
   border: 1px solid #bcc5d2;
   background:
@@ -934,7 +934,7 @@ blockquote {
   width: min(640px, calc(100vw - 432px));
   min-width: 560px;
   height: min(720px, calc(100vh - 48px));
-  padding: 12px;
+  padding: 1px;
   border-radius: 34px;
   border: 1px solid #bcc5d2;
   background: linear-gradient(180deg, #e6ebf2, #cfd6e0 62%, #c2cad6);
@@ -955,12 +955,12 @@ blockquote {
 
 .phone-hardware {
   background: linear-gradient(180deg, #171c25, #11161f);
-  padding: 14px 10px 12px;
+  padding: 4px 4px 4px;
 }
 
 .tablet-bezel {
   background: linear-gradient(180deg, #0f1319, #181d25);
-  padding: 16px;
+  padding: 8px;
 }
 
 .phone-island,
