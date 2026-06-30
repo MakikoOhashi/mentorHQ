@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { buildCoachConversation } from "@/lib/deliberation/coach-conversation";
-import { buildStatementObservationInput, detectReasoningStyle } from "@/lib/deliberation/observation";
+import { buildStatementObservationInput } from "@/lib/deliberation/observation";
 import type {
   DailyReview,
   DailySession,
@@ -149,32 +149,28 @@ function buildImmediateAcknowledgement(reason: string): string {
     return "回答ありがとうございます。";
   }
 
-  if (/わからない|分からない|迷|なんとなく|たぶん|自信がない/.test(normalized)) {
-    return "ありがとうございます。迷ったポイントも一緒に見ていきます。";
+  if (/わからない|分からない|よく分からなかった|自信がない/.test(normalized)) {
+    return "迷いながら回答したんですね。";
   }
 
-  if (/\d/.test(normalized) || /[0-9０-９]+(?:か月|ヶ月|日|年|割|分)/.test(normalized)) {
-    return "数字を根拠に考えたんですね。";
+  const quotedFragment = normalized.match(/[「『"]?([^「」『』"]{1,18})[」』"]?(?:って|と|が|を|は|から|ので|だけ|部分)/);
+  if (quotedFragment?.[1]) {
+    return `「${quotedFragment[1]}」という部分を根拠にしたんですね。`;
   }
 
-  if (/条件|ただし|場合|とき|なら|要件|例外/.test(normalized)) {
+  if (/条件/.test(normalized)) {
     return "条件を意識して読んだんですね。";
   }
 
-  const reasoningStyle = detectReasoningStyle(normalized);
-  if (reasoningStyle === "memory_based") {
-    return "その知識を手がかりに判断したんですね。";
+  if (/迷/.test(normalized)) {
+    return "迷いながら回答したんですね。";
   }
 
-  if (reasoningStyle === "condition_based") {
-    return "根拠を見ながら判断したんですね。";
+  if (normalized.length <= 18) {
+    return `なるほど、「${normalized}」が今回の理由なんですね。`;
   }
 
-  if (reasoningStyle === "intuition") {
-    return "まずはその感覚で判断したんですね。";
-  }
-
-  return "そう考えた理由を受け取りました。";
+  return `なるほど、「${normalized}」と考えたんですね。`;
 }
 
 
