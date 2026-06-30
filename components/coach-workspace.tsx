@@ -173,11 +173,15 @@ function buildPointLine(statement: LearnerCase["statements"][number]): string {
   }
 
   const conciseExplanation = statement.explanation.replace(/\s+/g, " ");
-  if (conciseExplanation.length <= 42) {
+  if (/条件|要件|ただし|場合/.test(conciseExplanation)) {
+    return "決め手は条件句でした。";
+  }
+
+  if (conciseExplanation.length <= 28) {
     return conciseExplanation;
   }
 
-  return `${conciseExplanation.slice(0, 42)}...`;
+  return `${conciseExplanation.slice(0, 28)}...`;
 }
 
 function buildImmediateCoaching(
@@ -197,7 +201,7 @@ function buildImmediateCoaching(
     severity: isRight ? "good" : "caution",
     lines: [
       buildAcknowledgement(normalized),
-      isRight ? "○です。" : "今回は×です。",
+      isRight ? "今回はその判断で大丈夫です。" : "今回はここだけ違いました。",
       buildPointLine(statement)
     ]
   };
