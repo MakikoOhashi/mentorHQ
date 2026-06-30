@@ -955,7 +955,7 @@ blockquote {
 
 .phone-hardware {
   background: linear-gradient(180deg, #171c25, #11161f);
-  padding: 4px 4px 4px;
+  padding: 8px;
 }
 
 .tablet-bezel {
@@ -1138,7 +1138,7 @@ blockquote {
   margin: 0 0 4px;
   padding: 12px 14px 4px;
   background: linear-gradient(180deg, rgba(247, 250, 254, 0.98), rgba(247, 250, 254, 0.82));
-  backdrop-filter: blur(10px);
+  /* backdrop-filter: blur(10px); */
 }
 
 .tablet-simulator-status {
