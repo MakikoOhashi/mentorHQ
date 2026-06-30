@@ -526,7 +526,9 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     <main className="demo-viewport">
       <section className="device-layout">
         <article className="phone-frame">
-          <div className="device-scroll-shell">
+          <div className="phone-hardware">
+            <div className="phone-island" aria-hidden="true" />
+            <div className="device-scroll-shell phone-screen">
             <div className="simulator-status-bar phone-simulator-status" aria-hidden="true">
               <span className="simulator-time">9:41</span>
               <div className="simulator-status-icons">
@@ -594,9 +596,9 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                     </button>
                   </div>
                 ) : null}
-                <div>
-                  <p className="phone-app-label">Learner App</p>
-                  <p className="phone-app-name">MentorHQ Student</p>
+                <div className="phone-title-group">
+                  <p className="phone-app-label">MentorHQ</p>
+                  <p className="phone-app-name">Student</p>
                 </div>
               </div>
               <div className="phone-status">
@@ -922,10 +924,13 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
               <span>{observations.length} observations</span>
             </div>
           </div>
+          </div>
         </article>
 
         <article className="tablet-frame">
-          <div className="device-scroll-shell coach-scroll-shell">
+          <div className="tablet-bezel">
+            <div className="tablet-camera" aria-hidden="true" />
+            <div className="device-scroll-shell coach-scroll-shell tablet-screen">
             <div className="simulator-status-bar tablet-simulator-status" aria-hidden="true">
               <span className="simulator-time">9:41</span>
               <div className="simulator-status-icons">
@@ -980,6 +985,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                 )}
               </div>
             </div>
+          </div>
           </div>
         </article>
       </section>
