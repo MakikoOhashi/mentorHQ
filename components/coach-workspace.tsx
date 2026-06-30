@@ -40,14 +40,12 @@ type LearnerStep =
 
 type QuestionPhase = "stem" | "statement" | "statement-result" | "final" | "result";
 
-type StatementFeedback = {
-  lines: string[];
-  severity: "good" | "caution";
-};
-
 type ImmediateCoaching = {
-  lines: string[];
+  mode: "correct" | "incorrect";
   severity: "good" | "caution";
+  lines: string[];
+  messages?: Array<{ id: string; role: "learner" | "coach"; text: string }>;
+  resolved?: boolean;
 };
 
 type ReasonOption = {
@@ -123,15 +121,21 @@ function getCurrentStep(session: DailySession | null, tomorrowPlan: TomorrowPlan
 }
 
 function getQuestionPhaseFromObservations(learnerCase: LearnerCase | null, questionObservations: ObservationEvent[]): QuestionPhase {
+  const completedStatementCount = new Set(
+    questionObservations
+      .map((observation) => observation.statement_index)
+      .filter((statementIndex): statementIndex is number => typeof statementIndex === "number")
+  ).size;
+
   if (!learnerCase) {
     return "stem";
   }
 
-  if (questionObservations.length === 0) {
+  if (completedStatementCount === 0) {
     return "stem";
   }
 
-  if (questionObservations.length < learnerCase.statements.length) {
+  if (completedStatementCount < learnerCase.statements.length) {
     return "statement";
   }
 
@@ -173,27 +177,6 @@ function buildAcknowledgement(reason: string): string {
   return `なるほど、「${compactReason}」が理由なんですね。`;
 }
 
-function isQuestionReason(reason: string): boolean {
-  const normalized = normalizeReason(reason);
-
-  if (!normalized) {
-    return false;
-  }
-
-  return /[？?]$/.test(normalized) || /これって|ですか|ますか|じゃないの|なのかな|いいの/.test(normalized);
-}
-
-function buildQuestionResponse(statement: LearnerCase["statements"][number], reason: string): StatementFeedback {
-  const normalized = normalizeReason(reason);
-  const lead =
-    normalized.length > 0 ? `${buildAcknowledgement(normalized)}\nそこが迷いやすいところですね。` : "そこが迷いやすいところですね。";
-
-  return {
-    severity: statement.isCorrect ? "good" : "caution",
-    lines: [lead, statement.explanation]
-  };
-}
-
 function buildPointLine(statement: LearnerCase["statements"][number]): string {
   const match = statement.explanation.match(/「[^」]+」/);
   if (match) {
@@ -212,26 +195,84 @@ function buildPointLine(statement: LearnerCase["statements"][number]): string {
   return `${conciseExplanation.slice(0, 28)}...`;
 }
 
+function extractPointFocus(statement: LearnerCase["statements"][number]): string {
+  const match = statement.explanation.match(/「[^」]+」/);
+  if (match) {
+    return match[0];
+  }
+
+  if (/条件|要件|ただし|場合/.test(statement.explanation)) {
+    return "条件の置き方";
+  }
+
+  return "どこを基準に判断するか";
+}
+
+function buildIncorrectReply(
+  statement: LearnerCase["statements"][number],
+  message: string,
+  learnerTurnCount: number
+): { text: string; resolved: boolean } {
+  const normalized = normalizeReason(message);
+  const pointFocus = extractPointFocus(statement);
+
+  if (/わかりました|分かりました|なるほど|理解しました|了解|そういうこと/.test(normalized)) {
+    return {
+      text: "そうです。\nそこが今回のポイントですね。\nでは次の肢へ進みましょう。",
+      resolved: true
+    };
+  }
+
+  if (/3か月|3ヶ月|数字/.test(normalized)) {
+    return {
+      text: `数字には気付けています。\n今回は数字ではなく、${pointFocus} がポイントです。`,
+      resolved: learnerTurnCount >= 1
+    };
+  }
+
+  if (/条件|ただし|場合|要件/.test(normalized)) {
+    return {
+      text: `条件に注目できているのは良いです。\nこの肢では ${pointFocus} を押さえると整理しやすいです。`,
+      resolved: learnerTurnCount >= 1
+    };
+  }
+
+  if (learnerTurnCount >= 1) {
+    return {
+      text: `その引っ掛かり方で大丈夫です。\n今回は ${pointFocus} を押さえれば十分です。\nでは次の肢へ進みましょう。`,
+      resolved: true
+    };
+  }
+
+  return {
+    text: `その点が気になったんですね。\n今回は ${pointFocus} を手掛かりにすると整理しやすいです。`,
+    resolved: false
+  };
+}
+
 function buildImmediateCoaching(
   statement: LearnerCase["statements"][number],
   choice: StatementChoice,
   reason: string
 ): ImmediateCoaching {
-  if (isQuestionReason(reason)) {
-    return buildQuestionResponse(statement, reason);
-  }
-
   const learnerMarkedCorrect = choice === "correct";
   const isRight = learnerMarkedCorrect === statement.isCorrect;
   const normalized = reason.trim().replace(/\s+/g, " ");
 
+  if (isRight) {
+    return {
+      mode: "correct",
+      severity: "good",
+      lines: ["✓ 正解", buildPointLine(statement)]
+    };
+  }
+
   return {
-    severity: isRight ? "good" : "caution",
-    lines: [
-      buildAcknowledgement(normalized),
-      isRight ? "今回はその判断で大丈夫です。" : "今回はここだけ違いました。",
-      buildPointLine(statement)
-    ]
+    mode: "incorrect",
+    severity: "caution",
+    lines: [buildAcknowledgement(normalized), "今回はここだけ違いました。", "どこが気になりましたか？"],
+    messages: [],
+    resolved: false
   };
 }
 
@@ -255,6 +296,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const [statementChoice, setStatementChoice] = useState<StatementChoice | null>(null);
   const [selectedReasonId, setSelectedReasonId] = useState<string | null>(null);
   const [reasonOtherText, setReasonOtherText] = useState("");
+  const [incorrectChatInput, setIncorrectChatInput] = useState("");
   const [finalChoice, setFinalChoice] = useState<number | null>(null);
   const [finalResult, setFinalResult] = useState<FinalResult | null>(null);
   const [submittedStatementResult, setSubmittedStatementResult] = useState<ImmediateCoaching | null>(null);
@@ -290,6 +332,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     setStatementChoice(null);
     setSelectedReasonId(null);
     setReasonOtherText("");
+    setIncorrectChatInput("");
     setFinalChoice(null);
     setFinalResult(null);
     setSubmittedStatementResult(null);
@@ -336,6 +379,15 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const currentQuestionObservations = useMemo(
     () => observations.filter((observation) => observation.question_id === currentQuestionId),
     [currentQuestionId, observations]
+  );
+  const completedStatementCount = useMemo(
+    () =>
+      new Set(
+        currentQuestionObservations
+          .map((observation) => observation.statement_index)
+          .filter((statementIndex): statementIndex is number => typeof statementIndex === "number")
+      ).size,
+    [currentQuestionObservations]
   );
 
   const coachConversation = useMemo(() => buildCoachConversation(observations), [observations]);
@@ -392,12 +444,14 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     }
 
     setQuestionPhase(getQuestionPhaseFromObservations(learnerCase, currentQuestionObservations));
-    setCurrentStatementIndex(currentQuestionObservations.length);
+    setCurrentStatementIndex(completedStatementCount);
     setStatementChoice(null);
     setSelectedReasonId(null);
     setReasonOtherText("");
+    setIncorrectChatInput("");
     setFinalChoice(null);
   }, [
+    completedStatementCount,
     currentQuestionId,
     currentQuestionObservations,
     dailySession?.status,
@@ -427,6 +481,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       setStatementChoice(null);
       setSelectedReasonId(null);
       setReasonOtherText("");
+      setIncorrectChatInput("");
       setFinalChoice(null);
       setFinalResult(null);
       setSubmittedStatementResult(null);
@@ -511,13 +566,98 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
 
   const proceedAfterStatementResult = useCallback(() => {
     setSubmittedStatementResult(null);
-    setCurrentStatementIndex(currentQuestionObservations.length);
+    setCurrentStatementIndex(completedStatementCount);
     setStatementChoice(null);
     setSelectedReasonId(null);
     setReasonOtherText("");
+    setIncorrectChatInput("");
     setFinalChoice(null);
     setQuestionPhase(getQuestionPhaseFromObservations(learnerCase, currentQuestionObservations));
-  }, [currentQuestionObservations, learnerCase]);
+  }, [completedStatementCount, currentQuestionObservations, learnerCase]);
+
+  const sendIncorrectCoachingMessage = useCallback(async () => {
+    const statementForChat = learnerCase.statements[currentStatementIndex] ?? null;
+
+    if (
+      !dailySession ||
+      !currentQuestionId ||
+      !statementForChat ||
+      !statementChoice ||
+      !submittedStatementResult ||
+      submittedStatementResult.mode !== "incorrect"
+    ) {
+      return;
+    }
+
+    const learnerMessage = incorrectChatInput.trim();
+    if (!learnerMessage) {
+      return;
+    }
+
+    const learnerTurnCount = (submittedStatementResult.messages ?? []).filter((message) => message.role === "learner").length;
+    const reply = buildIncorrectReply(statementForChat, learnerMessage, learnerTurnCount);
+
+    setSessionActionStatus("saving");
+    setErrorMessage(null);
+
+    try {
+      const observation = buildStatementObservationInput({
+        dailySessionId: dailySession.id,
+        questionId: currentQuestionId,
+        questionIndex: dailySession.current_index,
+        statementIndex: currentStatementIndex + 1,
+        statement: statementForChat,
+        learnerChoice: statementChoice,
+        learnerReason: learnerMessage,
+        learnerNote: `Learner: ${learnerMessage}\nCoach: ${reply.text}`
+      });
+
+      const response = await fetch("/api/daily-session/observation", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          sessionId: dailySession.id,
+          observation
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error("Observation save failed.");
+      }
+
+      const payload = (await response.json()) as DailySessionPayload;
+      setSubmittedStatementResult((current) =>
+        current && current.mode === "incorrect"
+          ? {
+              ...current,
+              messages: [
+                ...(current.messages ?? []),
+                { id: `${Date.now()}-learner`, role: "learner", text: learnerMessage },
+                { id: `${Date.now()}-coach`, role: "coach", text: reply.text }
+              ],
+              resolved: reply.resolved
+            }
+          : current
+      );
+      setIncorrectChatInput("");
+      applyDailySessionPayload(payload);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unknown error");
+    } finally {
+      setSessionActionStatus("idle");
+    }
+  }, [
+    applyDailySessionPayload,
+    currentQuestionId,
+    currentStatementIndex,
+    dailySession,
+    incorrectChatInput,
+    learnerCase,
+    statementChoice,
+    submittedStatementResult
+  ]);
 
   const submitFinalAnswer = useCallback(async () => {
     if (!dailySession || !learnerCase || !currentQuestionId || !finalChoice) {
@@ -570,6 +710,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     setStatementChoice(null);
     setSelectedReasonId(null);
     setReasonOtherText("");
+    setIncorrectChatInput("");
     setFinalChoice(null);
     setLearnerStepOverride(null);
   }, [applyDailySessionPayload, queuedNextPayload]);
@@ -877,9 +1018,41 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                         {submittedStatementResult.lines.map((line) => (
                           <p key={line}>{line}</p>
                         ))}
-                        <button className="primary-button phone-button" onClick={proceedAfterStatementResult} type="button">
-                          {currentQuestionObservations.length >= learnerCase.statements.length ? "全体回答へ進む" : "次の肢へ進む"}
-                        </button>
+                        {submittedStatementResult.mode === "correct" ? (
+                          <button className="primary-button phone-button" onClick={proceedAfterStatementResult} type="button">
+                            {completedStatementCount >= learnerCase.statements.length ? "全体回答へ進む" : "次の肢へ進む"}
+                          </button>
+                        ) : (
+                          <>
+                            <div className="coaching-chat-list">
+                              {(submittedStatementResult.messages ?? []).map((message) => (
+                                <div className={`coaching-chat-bubble is-${message.role}`} key={message.id}>
+                                  <p>{message.text}</p>
+                                </div>
+                              ))}
+                            </div>
+                            <textarea
+                              className="reason-textarea"
+                              onChange={(event) => setIncorrectChatInput(event.target.value)}
+                              placeholder="気になった点を入力してください"
+                              rows={3}
+                              value={incorrectChatInput}
+                            />
+                            <button
+                              className="primary-button phone-button"
+                              onClick={() => void sendIncorrectCoachingMessage()}
+                              type="button"
+                              disabled={sessionActionStatus !== "idle" || incorrectChatInput.trim().length === 0}
+                            >
+                              送る
+                            </button>
+                            {submittedStatementResult.resolved ? (
+                              <button className="secondary-button phone-button" onClick={proceedAfterStatementResult} type="button">
+                                {completedStatementCount >= learnerCase.statements.length ? "全体回答へ進む" : "次の肢へ進む"}
+                              </button>
+                            ) : null}
+                          </>
+                        )}
                       </section>
                     ) : null
                   ) : null}

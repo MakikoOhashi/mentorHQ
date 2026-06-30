@@ -1529,6 +1529,37 @@ blockquote {
   width: 100%;
 }
 
+.coaching-chat-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  margin-bottom: 12px;
+}
+
+.coaching-chat-bubble {
+  max-width: 88%;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid #dbe2ec;
+}
+
+.coaching-chat-bubble p {
+  margin: 0;
+  line-height: 1.6;
+  white-space: pre-line;
+}
+
+.coaching-chat-bubble.is-learner {
+  justify-self: end;
+  background: #f7f8ff;
+  border-color: #cbd7ff;
+}
+
+.coaching-chat-bubble.is-coach {
+  justify-self: start;
+  background: rgba(255, 255, 255, 0.92);
+}
+
 .phone-footer {
   display: flex;
   flex-wrap: wrap;
