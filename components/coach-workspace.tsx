@@ -9,6 +9,7 @@ import type {
   DailySession,
   LearnerCase,
   ObservationEvent,
+  ReasoningStyle,
   StatementChoice,
   TomorrowPlan
 } from "@/lib/deliberation/types";
@@ -49,6 +50,12 @@ type ImmediateCoaching = {
   severity: "good" | "caution";
 };
 
+type ReasonOption = {
+  id: string;
+  label: string;
+  reasoningStyle: ReasoningStyle;
+};
+
 type FinalResult = {
   selectedIndex: number;
   correctIndex: number;
@@ -81,6 +88,15 @@ const STEP_LABELS: Record<LearnerStep, string> = {
 const STATEMENT_OPTIONS: Array<{ label: string; value: StatementChoice }> = [
   { label: "○ 正しい", value: "correct" },
   { label: "× 誤り", value: "incorrect" }
+];
+
+const REASON_OPTIONS: ReasonOption[] = [
+  { id: "statute_memory", label: "条文を覚えていた", reasoningStyle: "memory_based" },
+  { id: "number_based", label: "数字を根拠にした", reasoningStyle: "memory_based" },
+  { id: "condition_based", label: "条件句を見た", reasoningStyle: "condition_based" },
+  { id: "elimination", label: "消去法で選んだ", reasoningStyle: "intuition" },
+  { id: "uncertain", label: "自信がなかった", reasoningStyle: "uncertainty" },
+  { id: "other", label: "その他", reasoningStyle: "intuition" }
 ];
 
 function getCurrentStep(session: DailySession | null, tomorrowPlan: TomorrowPlan | null): LearnerStep {
@@ -133,8 +149,20 @@ function buildAcknowledgement(reason: string): string {
     return "回答ありがとうございます。";
   }
 
-  if (/条件/.test(normalized)) {
+  if (/条件句|条件/.test(normalized)) {
     return "条件を見て判断したんですね。";
+  }
+
+  if (/数字/.test(normalized)) {
+    return "数字を手掛かりに考えたんですね。";
+  }
+
+  if (/条文/.test(normalized)) {
+    return "条文の記憶を根拠にしたんですね。";
+  }
+
+  if (/消去法/.test(normalized)) {
+    return "消去法で絞っていったんですね。";
   }
 
   if (/わからない|分からない|迷|自信がない/.test(normalized)) {
@@ -225,7 +253,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const [questionPhase, setQuestionPhase] = useState<QuestionPhase>("stem");
   const [currentStatementIndex, setCurrentStatementIndex] = useState(0);
   const [statementChoice, setStatementChoice] = useState<StatementChoice | null>(null);
-  const [statementReason, setStatementReason] = useState("");
+  const [selectedReasonId, setSelectedReasonId] = useState<string | null>(null);
+  const [reasonOtherText, setReasonOtherText] = useState("");
   const [finalChoice, setFinalChoice] = useState<number | null>(null);
   const [finalResult, setFinalResult] = useState<FinalResult | null>(null);
   const [submittedStatementResult, setSubmittedStatementResult] = useState<ImmediateCoaching | null>(null);
@@ -259,7 +288,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     setQuestionPhase("stem");
     setCurrentStatementIndex(0);
     setStatementChoice(null);
-    setStatementReason("");
+    setSelectedReasonId(null);
+    setReasonOtherText("");
     setFinalChoice(null);
     setFinalResult(null);
     setSubmittedStatementResult(null);
@@ -364,7 +394,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     setQuestionPhase(getQuestionPhaseFromObservations(learnerCase, currentQuestionObservations));
     setCurrentStatementIndex(currentQuestionObservations.length);
     setStatementChoice(null);
-    setStatementReason("");
+    setSelectedReasonId(null);
+    setReasonOtherText("");
     setFinalChoice(null);
   }, [
     currentQuestionId,
@@ -394,7 +425,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       setQuestionPhase("stem");
       setCurrentStatementIndex(0);
       setStatementChoice(null);
-      setStatementReason("");
+      setSelectedReasonId(null);
+      setReasonOtherText("");
       setFinalChoice(null);
       setFinalResult(null);
       setSubmittedStatementResult(null);
@@ -408,7 +440,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   }, [applyDailySessionPayload]);
 
   const saveStatementObservation = useCallback(async () => {
-    if (!dailySession || !currentQuestionId || !learnerCase || !statementChoice) {
+    if (!dailySession || !currentQuestionId || !learnerCase || !statementChoice || !selectedReasonId) {
       return;
     }
 
@@ -416,6 +448,13 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     if (!currentStatement) {
       return;
     }
+
+    const selectedReason = REASON_OPTIONS.find((option) => option.id === selectedReasonId);
+    if (!selectedReason) {
+      return;
+    }
+
+    const learnerReason = selectedReason.id === "other" ? reasonOtherText.trim() || selectedReason.label : selectedReason.label;
 
     setSessionActionStatus("saving");
     setErrorMessage(null);
@@ -429,7 +468,9 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
         statementIndex: currentStatementIndex + 1,
         statement: currentStatement,
         learnerChoice: statementChoice,
-        learnerReason: statementReason
+        learnerReason,
+        learnerNote: selectedReason.id === "other" ? reasonOtherText : null,
+        reasoningStyle: selectedReason.reasoningStyle
       });
 
       const response = await fetch("/api/daily-session/observation", {
@@ -448,7 +489,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       }
 
       const payload = (await response.json()) as DailySessionPayload;
-      setSubmittedStatementResult(buildImmediateCoaching(currentStatement, statementChoice, statementReason));
+      setSubmittedStatementResult(buildImmediateCoaching(currentStatement, statementChoice, learnerReason));
       applyDailySessionPayload(payload);
     } catch (error) {
       setSubmittedStatementResult(null);
@@ -463,15 +504,17 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     currentStatementIndex,
     dailySession,
     learnerCase,
+    reasonOtherText,
+    selectedReasonId,
     statementChoice,
-    statementReason
   ]);
 
   const proceedAfterStatementResult = useCallback(() => {
     setSubmittedStatementResult(null);
     setCurrentStatementIndex(currentQuestionObservations.length);
     setStatementChoice(null);
-    setStatementReason("");
+    setSelectedReasonId(null);
+    setReasonOtherText("");
     setFinalChoice(null);
     setQuestionPhase(getQuestionPhaseFromObservations(learnerCase, currentQuestionObservations));
   }, [currentQuestionObservations, learnerCase]);
@@ -525,7 +568,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     setQuestionPhase("stem");
     setCurrentStatementIndex(0);
     setStatementChoice(null);
-    setStatementReason("");
+    setSelectedReasonId(null);
+    setReasonOtherText("");
     setFinalChoice(null);
     setLearnerStepOverride(null);
   }, [applyDailySessionPayload, queuedNextPayload]);
@@ -782,25 +826,42 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                       </div>
                       {statementChoice ? (
                         <section className="feedback-card feedback-card--caution">
-                          <span className="feedback-eyebrow">Reason</span>
-                          <label className="reason-label" htmlFor="statement-reason">
-                            なぜそう思いましたか？
+                          <span className="feedback-eyebrow">Reasoning</span>
+                          <label className="reason-label">
+                            何を根拠に判断しましたか？
                           </label>
-                          <textarea
-                            className="reason-textarea"
-                            id="statement-reason"
-                            onChange={(event) => setStatementReason(event.target.value)}
-                            placeholder="例: 3か月という数字を覚えていたため"
-                            rows={3}
-                            value={statementReason}
-                          />
+                          <div className="choice-list reason-choice-list" role="radiogroup" aria-label="判断根拠の選択">
+                            {REASON_OPTIONS.map((option) => (
+                              <button
+                                aria-checked={selectedReasonId === option.id}
+                                className={`choice-card ${selectedReasonId === option.id ? "is-selected" : ""}`}
+                                key={option.id}
+                                onClick={() => setSelectedReasonId(option.id)}
+                                role="radio"
+                                type="button"
+                              >
+                                <span className="choice-marker" aria-hidden="true" />
+                                <span>{option.label}</span>
+                              </button>
+                            ))}
+                          </div>
+                          {selectedReasonId === "other" ? (
+                            <textarea
+                              className="reason-textarea"
+                              id="statement-reason-other"
+                              onChange={(event) => setReasonOtherText(event.target.value)}
+                              placeholder="必要なら補足を一言"
+                              rows={3}
+                              value={reasonOtherText}
+                            />
+                          ) : null}
                           <button
                             className="primary-button phone-button"
                             onClick={() => void saveStatementObservation()}
                             type="button"
-                            disabled={sessionActionStatus !== "idle"}
+                            disabled={sessionActionStatus !== "idle" || !selectedReasonId}
                           >
-                            {sessionActionStatus === "saving" ? "送信中..." : "この理由を送る"}
+                            {sessionActionStatus === "saving" ? "送信中..." : "この根拠で送る"}
                           </button>
                         </section>
                       ) : null}

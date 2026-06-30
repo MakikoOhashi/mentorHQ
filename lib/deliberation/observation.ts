@@ -227,8 +227,10 @@ export function buildStatementObservationInput(params: {
   statement: QuestionStatement;
   learnerChoice: StatementChoice;
   learnerReason: string;
+  learnerNote?: string | null;
+  reasoningStyle?: ReasoningStyle;
 }): ObservationEventInput {
-  const reasoningStyle = detectReasoningStyle(params.learnerReason);
+  const reasoningStyle = params.reasoningStyle ?? detectReasoningStyle(params.learnerReason);
   const misunderstandingType = getReasoningMisunderstandingType(reasoningStyle);
   const correctness = detectStatementCorrectness(params.statement, params.learnerChoice);
   const observationNote = buildStatementObservationNote(
@@ -251,6 +253,6 @@ export function buildStatementObservationInput(params: {
     misunderstanding_type: misunderstandingType,
     confidence: detectStatementConfidence(reasoningStyle, params.learnerReason),
     observation_note: observationNote,
-    note: observationNote
+    note: params.learnerNote?.trim() ? params.learnerNote.trim() : observationNote
   };
 }
