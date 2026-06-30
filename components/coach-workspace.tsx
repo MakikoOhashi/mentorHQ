@@ -176,34 +176,48 @@ function buildIncorrectReply(
 
   if (/わかりました|分かりました|なるほど|理解しました|了解|そういうこと/.test(normalized)) {
     return {
-      text: "そうです。\nそこが今回のポイントですね。\nでは次の肢へ進みましょう。",
+      text: "はい。\nでは次の肢へ進みましょう。",
       resolved: true
+    };
+  }
+
+  if (/開始点|起算点|いつから|知った時/.test(normalized)) {
+    return {
+      text: `開始点は ${pointFocus} です。\nこの肢ではそこだけ押さえれば十分です。`,
+      resolved: learnerTurnCount >= 1
     };
   }
 
   if (/3か月|3ヶ月|数字/.test(normalized)) {
     return {
-      text: `数字には気付けています。\n今回は数字ではなく、${pointFocus} がポイントです。`,
+      text: `3か月で合っています。\n違うのは ${pointFocus} です。`,
+      resolved: learnerTurnCount >= 1
+    };
+  }
+
+  if (/家庭裁判所|申述|裁判所/.test(normalized)) {
+    return {
+      text: "はい。相続放棄は家庭裁判所への申述が必要です。\n他の相続人へ伝えるだけでは足りません。",
       resolved: learnerTurnCount >= 1
     };
   }
 
   if (/条件|ただし|場合|要件/.test(normalized)) {
     return {
-      text: `条件に注目できているのは良いです。\nこの肢では ${pointFocus} を押さえると整理しやすいです。`,
+      text: `この肢のポイントは ${pointFocus} です。\n条件はそこにかかっています。`,
       resolved: learnerTurnCount >= 1
     };
   }
 
   if (learnerTurnCount >= 1) {
     return {
-      text: `その引っ掛かり方で大丈夫です。\n今回は ${pointFocus} を押さえれば十分です。\nでは次の肢へ進みましょう。`,
+      text: `${pointFocus} を押さえれば十分です。\nでは次の肢へ進みましょう。`,
       resolved: true
     };
   }
 
   return {
-    text: `その点が気になったんですね。\n今回は ${pointFocus} を手掛かりにすると整理しやすいです。`,
+    text: `ポイントは ${pointFocus} です。\nこの肢ではそこを確認してください。`,
     resolved: false
   };
 }
