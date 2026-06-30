@@ -40,13 +40,18 @@ type LearnerStep =
 
 type QuestionPhase = "stem" | "statement" | "statement-result" | "final" | "result";
 
-type ImmediateCoaching = {
-  mode: "correct" | "incorrect";
-  severity: "good" | "caution";
-  lines: string[];
+type CorrectQuickFeedback = {
+  mode: "correct";
+  point: string;
+};
+
+type IncorrectConversation = {
+  mode: "incorrect";
   messages?: Array<{ id: string; role: "learner" | "coach"; text: string }>;
   resolved?: boolean;
 };
+
+type StatementResult = CorrectQuickFeedback | IncorrectConversation;
 
 type ReasonOption = {
   id: string;
@@ -241,30 +246,20 @@ function buildTranscriptNote(
 function buildImmediateCoaching(
   statement: LearnerCase["statements"][number],
   choice: StatementChoice,
-  reason: string
-): ImmediateCoaching {
+  _reason: string
+): StatementResult {
   const learnerMarkedCorrect = choice === "correct";
   const isRight = learnerMarkedCorrect === statement.isCorrect;
-  const normalized = normalizeReason(reason);
 
   if (isRight) {
     return {
       mode: "correct",
-      severity: "good",
-      lines: ["✓ 正解", "ポイント", buildPointLine(statement)]
+      point: buildPointLine(statement)
     };
   }
 
   return {
     mode: "incorrect",
-    severity: "caution",
-    lines: [
-      "❌",
-      "今回はここだけ違いました。",
-      ...(normalized ? [`最初は「${normalized}」が気になったんですね。`] : []),
-      "どこが気になりましたか？",
-      "自由に入力してください。"
-    ],
     messages: [],
     resolved: false
   };
@@ -293,7 +288,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const [incorrectChatInput, setIncorrectChatInput] = useState("");
   const [finalChoice, setFinalChoice] = useState<number | null>(null);
   const [finalResult, setFinalResult] = useState<FinalResult | null>(null);
-  const [submittedStatementResult, setSubmittedStatementResult] = useState<ImmediateCoaching | null>(null);
+  const [submittedStatementResult, setSubmittedStatementResult] = useState<StatementResult | null>(null);
   const [queuedNextPayload, setQueuedNextPayload] = useState<DailySessionPayload | null>(null);
   const [visibleThoughtIds, setVisibleThoughtIds] = useState<string[]>([]);
   const revealTimeoutIdsRef = useRef<number[]>([]);
@@ -1008,47 +1003,48 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                     sessionActionStatus === "saving" ? (
                       <div className="feedback-next-hint">AI Coach Mind が右側で確認しています。</div>
                     ) : submittedStatementResult ? (
-                      <section className={`feedback-card feedback-card--${submittedStatementResult.severity}`}>
-                        <span className="feedback-eyebrow">Immediate Coaching</span>
-                        {submittedStatementResult.lines.map((line) => (
-                          <p key={line}>{line}</p>
-                        ))}
-                        {submittedStatementResult.mode === "correct" ? (
+                      submittedStatementResult.mode === "correct" ? (
+                        <section className="feedback-card feedback-card--good">
+                          <p>✓ 正解</p>
+                          <p>ポイント</p>
+                          <p>{submittedStatementResult.point}</p>
                           <button className="primary-button phone-button" onClick={proceedAfterStatementResult} type="button">
                             {completedStatementCount >= learnerCase.statements.length ? "全体回答へ進む" : "次の肢へ進む"}
                           </button>
-                        ) : (
-                          <>
-                            <div className="coaching-chat-list">
-                              {(submittedStatementResult.messages ?? []).map((message) => (
-                                <div className={`coaching-chat-bubble is-${message.role}`} key={message.id}>
-                                  <p>{message.text}</p>
-                                </div>
-                              ))}
-                            </div>
-                            <textarea
-                              className="reason-textarea"
-                              onChange={(event) => setIncorrectChatInput(event.target.value)}
-                              placeholder="気になった点を入力してください"
-                              rows={3}
-                              value={incorrectChatInput}
-                            />
-                            <button
-                              className="primary-button phone-button"
-                              onClick={() => void sendIncorrectCoachingMessage()}
-                              type="button"
-                              disabled={sessionActionStatus !== "idle" || incorrectChatInput.trim().length === 0}
-                            >
-                              送る
+                        </section>
+                      ) : (
+                        <section className="feedback-card feedback-card--caution">
+                          <p>今回はここだけ違いました。</p>
+                          <p>どこが気になりましたか？</p>
+                          <div className="coaching-chat-list">
+                            {(submittedStatementResult.messages ?? []).map((message) => (
+                              <div className={`coaching-chat-bubble is-${message.role}`} key={message.id}>
+                                <p>{message.text}</p>
+                              </div>
+                            ))}
+                          </div>
+                          <textarea
+                            className="reason-textarea"
+                            onChange={(event) => setIncorrectChatInput(event.target.value)}
+                            placeholder="気になった点を入力してください"
+                            rows={3}
+                            value={incorrectChatInput}
+                          />
+                          <button
+                            className="primary-button phone-button"
+                            onClick={() => void sendIncorrectCoachingMessage()}
+                            type="button"
+                            disabled={sessionActionStatus !== "idle" || incorrectChatInput.trim().length === 0}
+                          >
+                            送る
+                          </button>
+                          {submittedStatementResult.resolved ? (
+                            <button className="secondary-button phone-button" onClick={proceedAfterStatementResult} type="button">
+                              {completedStatementCount >= learnerCase.statements.length ? "全体回答へ進む" : "次の肢へ進む"}
                             </button>
-                            {submittedStatementResult.resolved ? (
-                              <button className="secondary-button phone-button" onClick={proceedAfterStatementResult} type="button">
-                                {completedStatementCount >= learnerCase.statements.length ? "全体回答へ進む" : "次の肢へ進む"}
-                              </button>
-                            ) : null}
-                          </>
-                        )}
-                      </section>
+                          ) : null}
+                        </section>
+                      )
                     ) : null
                   ) : null}
 
