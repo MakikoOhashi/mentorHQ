@@ -172,6 +172,13 @@ function buildStatementObservationNote(
 ): string {
   const isCorrect = correctness === "correct";
   const correctnessPrefix = isCorrect ? "判断は合っています。" : "判断は外れています。";
+  const normalizedReason = reason.trim();
+
+  if (!normalizedReason) {
+    return isCorrect
+      ? `${correctnessPrefix} 肢${statementIndex}は理由入力なしで正しく判断できています。`
+      : `${correctnessPrefix} 肢${statementIndex}は追加質問の余地がありそうです。`;
+  }
 
   if (reasoningStyle === "memory_based") {
     return isCorrect
@@ -226,17 +233,18 @@ export function buildStatementObservationInput(params: {
   statementIndex: number;
   statement: QuestionStatement;
   learnerChoice: StatementChoice;
-  learnerReason: string;
+  learnerReason?: string;
   learnerNote?: string | null;
   reasoningStyle?: ReasoningStyle;
 }): ObservationEventInput {
-  const reasoningStyle = params.reasoningStyle ?? detectReasoningStyle(params.learnerReason);
+  const learnerReason = params.learnerReason?.trim() ?? "";
+  const reasoningStyle = params.reasoningStyle ?? detectReasoningStyle(learnerReason);
   const misunderstandingType = getReasoningMisunderstandingType(reasoningStyle);
   const correctness = detectStatementCorrectness(params.statement, params.learnerChoice);
   const observationNote = buildStatementObservationNote(
     params.statementIndex,
     reasoningStyle,
-    params.learnerReason,
+    learnerReason,
     correctness
   );
 
@@ -247,11 +255,11 @@ export function buildStatementObservationInput(params: {
     statement_index: params.statementIndex,
     learner_choice: params.learnerChoice,
     correct_or_wrong: correctness,
-    learner_reason: params.learnerReason.trim(),
+    learner_reason: learnerReason,
     reasoning_style: reasoningStyle,
     intervention_type: getReasoningIntervention(reasoningStyle),
     misunderstanding_type: misunderstandingType,
-    confidence: detectStatementConfidence(reasoningStyle, params.learnerReason),
+    confidence: detectStatementConfidence(reasoningStyle, learnerReason),
     observation_note: observationNote,
     note: params.learnerNote?.trim() ? params.learnerNote.trim() : observationNote
   };

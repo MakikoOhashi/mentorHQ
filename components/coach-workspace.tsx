@@ -9,7 +9,6 @@ import type {
   DailySession,
   LearnerCase,
   ObservationEvent,
-  ReasoningStyle,
   StatementChoice,
   TomorrowPlan
 } from "@/lib/deliberation/types";
@@ -53,12 +52,6 @@ type IncorrectConversation = {
 
 type StatementResult = CorrectQuickFeedback | IncorrectConversation;
 
-type ReasonOption = {
-  id: string;
-  label: string;
-  reasoningStyle: ReasoningStyle;
-};
-
 type FinalResult = {
   selectedIndex: number;
   correctIndex: number;
@@ -91,15 +84,6 @@ const STEP_LABELS: Record<LearnerStep, string> = {
 const STATEMENT_OPTIONS: Array<{ label: string; value: StatementChoice }> = [
   { label: "○ 正しい", value: "correct" },
   { label: "× 誤り", value: "incorrect" }
-];
-
-const REASON_OPTIONS: ReasonOption[] = [
-  { id: "statute_memory", label: "条文を覚えていた", reasoningStyle: "memory_based" },
-  { id: "number_based", label: "数字を根拠にした", reasoningStyle: "memory_based" },
-  { id: "condition_based", label: "条件句を見た", reasoningStyle: "condition_based" },
-  { id: "elimination", label: "消去法で選んだ", reasoningStyle: "intuition" },
-  { id: "uncertain", label: "自信がなかった", reasoningStyle: "uncertainty" },
-  { id: "other", label: "その他", reasoningStyle: "intuition" }
 ];
 
 function getCurrentStep(session: DailySession | null, tomorrowPlan: TomorrowPlan | null): LearnerStep {
@@ -245,8 +229,7 @@ function buildTranscriptNote(
 
 function buildImmediateCoaching(
   statement: LearnerCase["statements"][number],
-  choice: StatementChoice,
-  _reason: string
+  choice: StatementChoice
 ): StatementResult {
   const learnerMarkedCorrect = choice === "correct";
   const isRight = learnerMarkedCorrect === statement.isCorrect;
@@ -283,8 +266,6 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const [questionPhase, setQuestionPhase] = useState<QuestionPhase>("stem");
   const [currentStatementIndex, setCurrentStatementIndex] = useState(0);
   const [statementChoice, setStatementChoice] = useState<StatementChoice | null>(null);
-  const [selectedReasonId, setSelectedReasonId] = useState<string | null>(null);
-  const [reasonOtherText, setReasonOtherText] = useState("");
   const [incorrectChatInput, setIncorrectChatInput] = useState("");
   const [finalChoice, setFinalChoice] = useState<number | null>(null);
   const [finalResult, setFinalResult] = useState<FinalResult | null>(null);
@@ -319,8 +300,6 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     setQuestionPhase("stem");
     setCurrentStatementIndex(0);
     setStatementChoice(null);
-    setSelectedReasonId(null);
-    setReasonOtherText("");
     setIncorrectChatInput("");
     setFinalChoice(null);
     setFinalResult(null);
@@ -435,8 +414,6 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     setQuestionPhase(getQuestionPhaseFromObservations(learnerCase, currentQuestionObservations));
     setCurrentStatementIndex(completedStatementCount);
     setStatementChoice(null);
-    setSelectedReasonId(null);
-    setReasonOtherText("");
     setIncorrectChatInput("");
     setFinalChoice(null);
   }, [
@@ -468,8 +445,6 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       setQuestionPhase("stem");
       setCurrentStatementIndex(0);
       setStatementChoice(null);
-      setSelectedReasonId(null);
-      setReasonOtherText("");
       setIncorrectChatInput("");
       setFinalChoice(null);
       setFinalResult(null);
@@ -483,8 +458,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     }
   }, [applyDailySessionPayload]);
 
-  const saveStatementObservation = useCallback(async () => {
-    if (!dailySession || !currentQuestionId || !learnerCase || !statementChoice || !selectedReasonId) {
+  const saveStatementObservation = useCallback(async (choice: StatementChoice) => {
+    if (!dailySession || !currentQuestionId || !learnerCase) {
       return;
     }
 
@@ -493,16 +468,10 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       return;
     }
 
-    const selectedReason = REASON_OPTIONS.find((option) => option.id === selectedReasonId);
-    if (!selectedReason) {
-      return;
-    }
-
-    const learnerReason = selectedReason.id === "other" ? reasonOtherText.trim() || selectedReason.label : selectedReason.label;
-
     setSessionActionStatus("saving");
     setErrorMessage(null);
     setQuestionPhase("statement-result");
+    setStatementChoice(choice);
 
     try {
       const observation = buildStatementObservationInput({
@@ -511,10 +480,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
         questionIndex: dailySession.current_index,
         statementIndex: currentStatementIndex + 1,
         statement: currentStatement,
-        learnerChoice: statementChoice,
-        learnerReason,
-        learnerNote: selectedReason.id === "other" ? reasonOtherText : null,
-        reasoningStyle: selectedReason.reasoningStyle
+        learnerChoice: choice
       });
 
       const response = await fetch("/api/daily-session/observation", {
@@ -533,7 +499,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       }
 
       const payload = (await response.json()) as DailySessionPayload;
-      setSubmittedStatementResult(buildImmediateCoaching(currentStatement, statementChoice, learnerReason));
+      setSubmittedStatementResult(buildImmediateCoaching(currentStatement, choice));
       applyDailySessionPayload(payload);
     } catch (error) {
       setSubmittedStatementResult(null);
@@ -547,18 +513,13 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     currentQuestionId,
     currentStatementIndex,
     dailySession,
-    learnerCase,
-    reasonOtherText,
-    selectedReasonId,
-    statementChoice,
+    learnerCase
   ]);
 
   const proceedAfterStatementResult = useCallback(() => {
     setSubmittedStatementResult(null);
     setCurrentStatementIndex(completedStatementCount);
     setStatementChoice(null);
-    setSelectedReasonId(null);
-    setReasonOtherText("");
     setIncorrectChatInput("");
     setFinalChoice(null);
     setQuestionPhase(getQuestionPhaseFromObservations(learnerCase, currentQuestionObservations));
@@ -698,8 +659,6 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     setQuestionPhase("stem");
     setCurrentStatementIndex(0);
     setStatementChoice(null);
-    setSelectedReasonId(null);
-    setReasonOtherText("");
     setIncorrectChatInput("");
     setFinalChoice(null);
     setLearnerStepOverride(null);
@@ -946,56 +905,16 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                             aria-checked={statementChoice === option.value}
                             className={`choice-card ${statementChoice === option.value ? "is-selected" : ""}`}
                             key={option.value}
-                            onClick={() => setStatementChoice(option.value)}
+                            onClick={() => void saveStatementObservation(option.value)}
                             role="radio"
                             type="button"
+                            disabled={sessionActionStatus !== "idle"}
                           >
                             <span className="choice-marker" aria-hidden="true" />
                             <span>{option.label}</span>
                           </button>
                         ))}
                       </div>
-                      {statementChoice ? (
-                        <section className="feedback-card feedback-card--caution">
-                          <span className="feedback-eyebrow">Reasoning</span>
-                          <label className="reason-label">
-                            何を根拠に判断しましたか？
-                          </label>
-                          <div className="choice-list reason-choice-list" role="radiogroup" aria-label="判断根拠の選択">
-                            {REASON_OPTIONS.map((option) => (
-                              <button
-                                aria-checked={selectedReasonId === option.id}
-                                className={`choice-card ${selectedReasonId === option.id ? "is-selected" : ""}`}
-                                key={option.id}
-                                onClick={() => setSelectedReasonId(option.id)}
-                                role="radio"
-                                type="button"
-                              >
-                                <span className="choice-marker" aria-hidden="true" />
-                                <span>{option.label}</span>
-                              </button>
-                            ))}
-                          </div>
-                          {selectedReasonId === "other" ? (
-                            <textarea
-                              className="reason-textarea"
-                              id="statement-reason-other"
-                              onChange={(event) => setReasonOtherText(event.target.value)}
-                              placeholder="必要なら補足を一言"
-                              rows={3}
-                              value={reasonOtherText}
-                            />
-                          ) : null}
-                          <button
-                            className="primary-button phone-button"
-                            onClick={() => void saveStatementObservation()}
-                            type="button"
-                            disabled={sessionActionStatus !== "idle" || !selectedReasonId}
-                          >
-                            {sessionActionStatus === "saving" ? "送信中..." : "この根拠で送る"}
-                          </button>
-                        </section>
-                      ) : null}
                     </>
                   ) : null}
 
@@ -1014,8 +933,11 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                         </section>
                       ) : (
                         <section className="feedback-card feedback-card--caution">
+                          <p>❌</p>
                           <p>今回はここだけ違いました。</p>
-                          <p>どこが気になりましたか？</p>
+                          <p>ポイント</p>
+                          <p>{currentStatement ? buildPointLine(currentStatement) : ""}</p>
+                          <p>気になることがあれば聞いてください。</p>
                           <div className="coaching-chat-list">
                             {(submittedStatementResult.messages ?? []).map((message) => (
                               <div className={`coaching-chat-bubble is-${message.role}`} key={message.id}>
@@ -1038,11 +960,9 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                           >
                             送る
                           </button>
-                          {submittedStatementResult.resolved ? (
-                            <button className="secondary-button phone-button" onClick={proceedAfterStatementResult} type="button">
-                              {completedStatementCount >= learnerCase.statements.length ? "全体回答へ進む" : "次の肢へ進む"}
-                            </button>
-                          ) : null}
+                          <button className="secondary-button phone-button" onClick={proceedAfterStatementResult} type="button">
+                            {completedStatementCount >= learnerCase.statements.length ? "全体回答へ進む" : "次の肢へ進む"}
+                          </button>
                         </section>
                       )
                     ) : null
