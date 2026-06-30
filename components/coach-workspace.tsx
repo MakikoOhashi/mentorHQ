@@ -146,41 +146,10 @@ function normalizeReason(reason: string): string {
   return reason.trim().replace(/\s+/g, " ");
 }
 
-function buildAcknowledgement(reason: string): string {
-  const normalized = normalizeReason(reason);
-
-  if (!normalized) {
-    return "回答ありがとうございます。";
-  }
-
-  if (/条件句|条件/.test(normalized)) {
-    return "条件を見て判断したんですね。";
-  }
-
-  if (/数字/.test(normalized)) {
-    return "数字を手掛かりに考えたんですね。";
-  }
-
-  if (/条文/.test(normalized)) {
-    return "条文の記憶を根拠にしたんですね。";
-  }
-
-  if (/消去法/.test(normalized)) {
-    return "消去法で絞っていったんですね。";
-  }
-
-  if (/わからない|分からない|迷|自信がない/.test(normalized)) {
-    return "迷いながら答えたんですね。";
-  }
-
-  const compactReason = normalized.length <= 16 ? normalized : `${normalized.slice(0, 16)}...`;
-  return `なるほど、「${compactReason}」が理由なんですね。`;
-}
-
 function buildPointLine(statement: LearnerCase["statements"][number]): string {
   const match = statement.explanation.match(/「[^」]+」/);
   if (match) {
-    return `ポイントは ${match[0]} です。`;
+    return `${match[0]} が決め手でした。`;
   }
 
   const conciseExplanation = statement.explanation.replace(/\s+/g, " ");
@@ -250,6 +219,25 @@ function buildIncorrectReply(
   };
 }
 
+function buildTranscriptNote(
+  messages: Array<{ role: "learner" | "coach"; text: string }>,
+  learnerMessage: string,
+  coachReply: string
+): string {
+  const transcript = [
+    ...messages.map((message) => `${message.role === "learner" ? "Learner" : "Coach"}: ${message.text}`),
+    `Learner: ${learnerMessage}`,
+    `Coach: ${coachReply}`
+  ];
+  const normalized = normalizeReason(learnerMessage);
+
+  if (/わかりました|分かりました|なるほど|理解しました|了解|そういうこと/.test(normalized)) {
+    transcript.push("Understanding: learner acknowledged the point.");
+  }
+
+  return transcript.join("\n");
+}
+
 function buildImmediateCoaching(
   statement: LearnerCase["statements"][number],
   choice: StatementChoice,
@@ -257,20 +245,26 @@ function buildImmediateCoaching(
 ): ImmediateCoaching {
   const learnerMarkedCorrect = choice === "correct";
   const isRight = learnerMarkedCorrect === statement.isCorrect;
-  const normalized = reason.trim().replace(/\s+/g, " ");
+  const normalized = normalizeReason(reason);
 
   if (isRight) {
     return {
       mode: "correct",
       severity: "good",
-      lines: ["✓ 正解", buildPointLine(statement)]
+      lines: ["✓ 正解", "ポイント", buildPointLine(statement)]
     };
   }
 
   return {
     mode: "incorrect",
     severity: "caution",
-    lines: [buildAcknowledgement(normalized), "今回はここだけ違いました。", "どこが気になりましたか？"],
+    lines: [
+      "❌",
+      "今回はここだけ違いました。",
+      ...(normalized ? [`最初は「${normalized}」が気になったんですね。`] : []),
+      "どこが気になりましたか？",
+      "自由に入力してください。"
+    ],
     messages: [],
     resolved: false
   };
@@ -594,7 +588,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       return;
     }
 
-    const learnerTurnCount = (submittedStatementResult.messages ?? []).filter((message) => message.role === "learner").length;
+    const existingMessages = submittedStatementResult.messages ?? [];
+    const learnerTurnCount = existingMessages.filter((message) => message.role === "learner").length;
     const reply = buildIncorrectReply(statementForChat, learnerMessage, learnerTurnCount);
 
     setSessionActionStatus("saving");
@@ -609,7 +604,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
         statement: statementForChat,
         learnerChoice: statementChoice,
         learnerReason: learnerMessage,
-        learnerNote: `Learner: ${learnerMessage}\nCoach: ${reply.text}`
+        learnerNote: buildTranscriptNote(existingMessages, learnerMessage, reply.text)
       });
 
       const response = await fetch("/api/daily-session/observation", {
@@ -633,7 +628,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
           ? {
               ...current,
               messages: [
-                ...(current.messages ?? []),
+                ...existingMessages,
                 { id: `${Date.now()}-learner`, role: "learner", text: learnerMessage },
                 { id: `${Date.now()}-coach`, role: "coach", text: reply.text }
               ],
