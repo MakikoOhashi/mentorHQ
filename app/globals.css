@@ -923,9 +923,9 @@ blockquote {
   background:
     linear-gradient(180deg, #fbfdff, #dfe5ee 55%, #cfd6e0 100%),
     #fff;
-  box-shadow:
+  /* box-shadow:
     0 20px 44px rgba(38, 48, 68, 0.12),
-    inset 0 1px 0 rgba(255, 255, 255, 0.85);
+    inset 0 1px 0 rgba(255, 255, 255, 0.85); */
   overflow: hidden;
   flex: 0 0 auto;
 }
