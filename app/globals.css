@@ -1396,11 +1396,6 @@ blockquote {
   background: linear-gradient(180deg, #f7fbf8, #ffffff);
 }
 
-.feedback-card--ack {
-  border-color: #d8ddf6;
-  background: linear-gradient(180deg, #f7f8ff, #ffffff);
-}
-
 .feedback-card--caution {
   border-color: #d8ddf6;
   background: linear-gradient(180deg, #f7f8ff, #ffffff);

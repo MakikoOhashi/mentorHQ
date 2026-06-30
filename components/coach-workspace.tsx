@@ -40,14 +40,13 @@ type LearnerStep =
 type QuestionPhase = "stem" | "statement" | "statement-result" | "final" | "result";
 
 type StatementFeedback = {
-  title: string;
-  message: string;
+  lines: string[];
   severity: "good" | "caution";
 };
 
-type SubmittedStatementResult = {
-  acknowledgement: string;
-  feedback: StatementFeedback;
+type ImmediateCoaching = {
+  lines: string[];
+  severity: "good" | "caution";
 };
 
 type FinalResult = {
@@ -84,18 +83,6 @@ const STATEMENT_OPTIONS: Array<{ label: string; value: StatementChoice }> = [
   { label: "× 誤り", value: "incorrect" }
 ];
 
-const POSITIVE_FEEDBACKS: StatementFeedback[] = [
-  { title: "この判断は合っています。", message: "このまま次の肢も見ていきましょう。", severity: "good" },
-  { title: "ここは正しく判断できています。", message: "次の肢でも同じように確認していきましょう。", severity: "good" },
-  { title: "この肢は合っています。", message: "この調子で先へ進みましょう。", severity: "good" }
-];
-
-const CORRECTIVE_FEEDBACKS: StatementFeedback[] = [
-  { title: "この判断は外れています。", message: "この肢はあとで全体でもう一度整理します。", severity: "caution" },
-  { title: "この肢は誤りでした。", message: "次の肢に進みつつ全体で見直していきましょう。", severity: "caution" },
-  { title: "ここは外れています。", message: "このあと他の肢も並べて確認します。", severity: "caution" }
-];
-
 function getCurrentStep(session: DailySession | null, tomorrowPlan: TomorrowPlan | null): LearnerStep {
   if (!session) {
     return "morning";
@@ -119,13 +106,6 @@ function getCurrentStep(session: DailySession | null, tomorrowPlan: TomorrowPlan
   return "question-3";
 }
 
-function getImmediateFeedback(statement: LearnerCase["statements"][number], choice: StatementChoice): StatementFeedback {
-  const learnerMarkedCorrect = choice === "correct";
-  const isRight = learnerMarkedCorrect === statement.isCorrect;
-  const source = isRight ? POSITIVE_FEEDBACKS : CORRECTIVE_FEEDBACKS;
-  return source[(statement.id.length + (choice === "correct" ? 1 : 0)) % source.length];
-}
-
 function getQuestionPhaseFromObservations(learnerCase: LearnerCase | null, questionObservations: ObservationEvent[]): QuestionPhase {
   if (!learnerCase) {
     return "stem";
@@ -142,35 +122,85 @@ function getQuestionPhaseFromObservations(learnerCase: LearnerCase | null, quest
   return "final";
 }
 
-function buildImmediateAcknowledgement(reason: string): string {
-  const normalized = reason.trim().replace(/\s+/g, " ");
+function normalizeReason(reason: string): string {
+  return reason.trim().replace(/\s+/g, " ");
+}
+
+function buildAcknowledgement(reason: string): string {
+  const normalized = normalizeReason(reason);
 
   if (!normalized) {
     return "回答ありがとうございます。";
   }
 
-  if (/わからない|分からない|よく分からなかった|自信がない/.test(normalized)) {
-    return "迷いながら回答したんですね。";
-  }
-
-  const quotedFragment = normalized.match(/[「『"]?([^「」『』"]{1,18})[」』"]?(?:って|と|が|を|は|から|ので|だけ|部分)/);
-  if (quotedFragment?.[1]) {
-    return `「${quotedFragment[1]}」という部分を根拠にしたんですね。`;
-  }
-
   if (/条件/.test(normalized)) {
-    return "条件を意識して読んだんですね。";
+    return "条件を見て判断したんですね。";
   }
 
-  if (/迷/.test(normalized)) {
-    return "迷いながら回答したんですね。";
+  if (/わからない|分からない|迷|自信がない/.test(normalized)) {
+    return "迷いながら答えたんですね。";
   }
 
-  if (normalized.length <= 18) {
-    return `なるほど、「${normalized}」が今回の理由なんですね。`;
+  const compactReason = normalized.length <= 16 ? normalized : `${normalized.slice(0, 16)}...`;
+  return `なるほど、「${compactReason}」が理由なんですね。`;
+}
+
+function isQuestionReason(reason: string): boolean {
+  const normalized = normalizeReason(reason);
+
+  if (!normalized) {
+    return false;
   }
 
-  return `なるほど、「${normalized}」と考えたんですね。`;
+  return /[？?]$/.test(normalized) || /これって|ですか|ますか|じゃないの|なのかな|いいの/.test(normalized);
+}
+
+function buildQuestionResponse(statement: LearnerCase["statements"][number], reason: string): StatementFeedback {
+  const normalized = normalizeReason(reason);
+  const lead =
+    normalized.length > 0 ? `${buildAcknowledgement(normalized)}\nそこが迷いやすいところですね。` : "そこが迷いやすいところですね。";
+
+  return {
+    severity: statement.isCorrect ? "good" : "caution",
+    lines: [lead, statement.explanation]
+  };
+}
+
+function buildPointLine(statement: LearnerCase["statements"][number]): string {
+  const match = statement.explanation.match(/「[^」]+」/);
+  if (match) {
+    return `ポイントは ${match[0]} です。`;
+  }
+
+  const conciseExplanation = statement.explanation.replace(/\s+/g, " ");
+  if (conciseExplanation.length <= 42) {
+    return conciseExplanation;
+  }
+
+  return `${conciseExplanation.slice(0, 42)}...`;
+}
+
+function buildImmediateCoaching(
+  statement: LearnerCase["statements"][number],
+  choice: StatementChoice,
+  reason: string
+): ImmediateCoaching {
+  if (isQuestionReason(reason)) {
+    return buildQuestionResponse(statement, reason);
+  }
+
+  const learnerMarkedCorrect = choice === "correct";
+  const isRight = learnerMarkedCorrect === statement.isCorrect;
+  const normalized = reason.trim().replace(/\s+/g, " ");
+
+  return {
+    severity: isRight ? "good" : "caution",
+    lines: [
+      buildAcknowledgement(normalized),
+      isRight ? "○です。" : "今回は×です。",
+      buildPointLine(statement)
+    ]
+  };
 }
 
 
@@ -194,7 +224,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const [statementReason, setStatementReason] = useState("");
   const [finalChoice, setFinalChoice] = useState<number | null>(null);
   const [finalResult, setFinalResult] = useState<FinalResult | null>(null);
-  const [submittedStatementResult, setSubmittedStatementResult] = useState<SubmittedStatementResult | null>(null);
+  const [submittedStatementResult, setSubmittedStatementResult] = useState<ImmediateCoaching | null>(null);
   const [queuedNextPayload, setQueuedNextPayload] = useState<DailySessionPayload | null>(null);
   const [visibleThoughtIds, setVisibleThoughtIds] = useState<string[]>([]);
   const revealTimeoutIdsRef = useRef<number[]>([]);
@@ -385,10 +415,6 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
 
     setSessionActionStatus("saving");
     setErrorMessage(null);
-    setSubmittedStatementResult({
-      acknowledgement: buildImmediateAcknowledgement(statementReason),
-      feedback: getImmediateFeedback(currentStatement, statementChoice)
-    });
     setQuestionPhase("statement-result");
 
     try {
@@ -418,6 +444,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       }
 
       const payload = (await response.json()) as DailySessionPayload;
+      setSubmittedStatementResult(buildImmediateCoaching(currentStatement, statementChoice, statementReason));
       applyDailySessionPayload(payload);
     } catch (error) {
       setSubmittedStatementResult(null);
@@ -776,25 +803,20 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                     </>
                   ) : null}
 
-                  {questionPhase === "statement-result" && submittedStatementResult ? (
-                    <>
-                      <section className="feedback-card feedback-card--ack">
-                        <span className="feedback-eyebrow">Immediate Acknowledgement</span>
-                        <p>{submittedStatementResult.acknowledgement}</p>
+                  {questionPhase === "statement-result" ? (
+                    sessionActionStatus === "saving" ? (
+                      <div className="feedback-next-hint">AI Coach Mind が右側で確認しています。</div>
+                    ) : submittedStatementResult ? (
+                      <section className={`feedback-card feedback-card--${submittedStatementResult.severity}`}>
+                        <span className="feedback-eyebrow">Immediate Coaching</span>
+                        {submittedStatementResult.lines.map((line) => (
+                          <p key={line}>{line}</p>
+                        ))}
+                        <button className="primary-button phone-button" onClick={proceedAfterStatementResult} type="button">
+                          {currentQuestionObservations.length >= learnerCase.statements.length ? "全体回答へ進む" : "次の肢へ進む"}
+                        </button>
                       </section>
-                      {sessionActionStatus === "saving" ? (
-                        <div className="feedback-next-hint">AI Coach Mind が右側で確認しています。</div>
-                      ) : (
-                        <section className={`feedback-card feedback-card--${submittedStatementResult.feedback.severity}`}>
-                          <span className="feedback-eyebrow">Immediate Feedback</span>
-                          <h4>{submittedStatementResult.feedback.title}</h4>
-                          <p>{submittedStatementResult.feedback.message}</p>
-                          <button className="primary-button phone-button" onClick={proceedAfterStatementResult} type="button">
-                            {currentQuestionObservations.length >= learnerCase.statements.length ? "全体回答へ進む" : "次の肢へ進む"}
-                          </button>
-                        </section>
-                      )}
-                    </>
+                    ) : null
                   ) : null}
 
                   {questionPhase === "final" ? (
