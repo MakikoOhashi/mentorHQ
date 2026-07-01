@@ -940,17 +940,19 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                         <section className="feedback-card feedback-card--good">
                           <p>✓ 正解</p>
                           <p>ポイント</p>
-                          <p>{submittedStatementResult.point}</p>
-                          <button className="primary-button phone-button" onClick={proceedAfterStatementResult} type="button">
-                            {completedStatementCount >= learnerCase.statements.length ? "全体回答へ進む" : "次の肢へ進む"}
-                          </button>
+                          <p className="feedback-point-text">{submittedStatementResult.point}</p>
+                          <div className="feedback-action-stack">
+                            <button className="primary-button phone-button" onClick={proceedAfterStatementResult} type="button">
+                              {completedStatementCount >= learnerCase.statements.length ? "全体回答へ進む" : "次の肢へ進む"}
+                            </button>
+                          </div>
                         </section>
                       ) : (
                         <section className="feedback-card feedback-card--caution">
                           <p>❌</p>
                           <p>今回はここだけ違いました。</p>
                           <p>ポイント</p>
-                          <p>{currentStatement ? buildPointLine(currentStatement) : ""}</p>
+                          <p className="feedback-point-text">{currentStatement ? buildPointLine(currentStatement) : ""}</p>
                           <p>気になることがあれば聞いてください。</p>
                           <div className="coaching-chat-list">
                             {(submittedStatementResult.messages ?? []).map((message) => (
@@ -974,9 +976,11 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                           >
                             送る
                           </button>
-                          <button className="secondary-button phone-button" onClick={proceedAfterStatementResult} type="button">
-                            {completedStatementCount >= learnerCase.statements.length ? "全体回答へ進む" : "次の肢へ進む"}
-                          </button>
+                          <div className="feedback-action-stack">
+                            <button className="secondary-button phone-button" onClick={proceedAfterStatementResult} type="button">
+                              {completedStatementCount >= learnerCase.statements.length ? "全体回答へ進む" : "次の肢へ進む"}
+                            </button>
+                          </div>
                         </section>
                       )
                     ) : null
