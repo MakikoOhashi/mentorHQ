@@ -880,6 +880,7 @@ blockquote {
 .secondary-button {
   background: #1f7757;
   box-shadow: 0 10px 24px rgba(31, 119, 87, 0.18);
+  border-radius: 14px;
 }
 
 .session-status-text {
