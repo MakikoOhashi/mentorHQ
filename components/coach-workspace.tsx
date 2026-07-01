@@ -131,111 +131,8 @@ function getQuestionPhaseFromObservations(learnerCase: LearnerCase | null, quest
   return "final";
 }
 
-function normalizeReason(reason: string): string {
-  return reason.trim().replace(/\s+/g, " ");
-}
-
 function buildPointLine(statement: LearnerCase["statements"][number]): string {
   return statement.explanation.replace(/\s+/g, " ").trim();
-}
-
-function extractPointFocus(statement: LearnerCase["statements"][number]): string {
-  const match = statement.explanation.match(/「[^」]+」/);
-  if (match) {
-    return match[0];
-  }
-
-  if (/条件|要件|ただし|場合/.test(statement.explanation)) {
-    return "条件の置き方";
-  }
-
-  return "どこを基準に判断するか";
-}
-
-function buildIncorrectReply(
-  statement: LearnerCase["statements"][number],
-  message: string,
-  learnerTurnCount: number
-): { text: string; resolved: boolean } {
-  const normalized = normalizeReason(message);
-  const pointFocus = extractPointFocus(statement);
-  const explanation = statement.explanation.replace(/\s+/g, " ").trim();
-  const articleNumber = /相続|熟慮期間|放棄/.test(statement.text) ? "民法915条" : null;
-
-  if (/わかりました|分かりました|なるほど|理解しました|了解|そういうこと/.test(normalized)) {
-    return {
-      text: "はい。\n理解できたら次の肢へ進みましょう。",
-      resolved: true
-    };
-  }
-
-  if (/(熟慮期間).*(何|なん|とは)|何.*(熟慮期間)|熟慮期間って/.test(normalized)) {
-    return {
-      text: "熟慮期間とは、相続を受けるか放棄するかを考えるために法律で認められた期間です。\n原則3か月あります。",
-      resolved: false
-    };
-  }
-
-  if (/開始してから|相続開始|開始後/.test(normalized)) {
-    return {
-      text: "開始後ならいつでもではありません。\n自己のために相続の開始があったことを知った日から3か月以内です。\nこの問題では「知った時から」がポイントです。",
-      resolved: false
-    };
-  }
-
-  if (/(開始点|起算点).*(何|なん|とは)|何.*(開始点|起算点)/.test(normalized)) {
-    return {
-      text: "開始点とは、期間をいつから数え始めるかという基準の時点です。\n相続放棄では、自己のために相続の開始があったことを知った日が基準になります。",
-      resolved: false
-    };
-  }
-
-  if (/民法.*何条|何条.*民法|条文|何条/.test(normalized) && articleNumber) {
-    return {
-      text: `${articleNumber}です。\n相続の承認・放棄の熟慮期間を定めています。`,
-      resolved: false
-    };
-  }
-
-  if (/開始点|起算点|いつから|知った時/.test(normalized)) {
-    return {
-      text: `開始点は ${pointFocus} です。\nこの問題では「知った時から」が基準になります。`,
-      resolved: false
-    };
-  }
-
-  if (/3か月|3ヶ月|数字/.test(normalized)) {
-    return {
-      text: `3か月で合っています。\n違うのは ${pointFocus} です。`,
-      resolved: false
-    };
-  }
-
-  if (/家庭裁判所|申述|裁判所/.test(normalized)) {
-    return {
-      text: "はい。相続放棄は家庭裁判所への申述が必要です。\n他の相続人へ伝えるだけでは足りません。",
-      resolved: false
-    };
-  }
-
-  if (/条件|ただし|場合|要件/.test(normalized)) {
-    return {
-      text: "要件が付く場合は、その条件を満たすときだけ結論が成り立ちます。\nこの問題では条件がどこにかかるかを確認してください。",
-      resolved: false
-    };
-  }
-
-  if (learnerTurnCount >= 1) {
-    return {
-      text: explanation,
-      resolved: false
-    };
-  }
-
-  return {
-    text: `${explanation}\n必要なら、気になる用語や条文をそのまま聞いてください。`,
-    resolved: false
-  };
 }
 
 function buildTranscriptNote(
@@ -248,12 +145,6 @@ function buildTranscriptNote(
     `Learner: ${learnerMessage}`,
     `Coach: ${coachReply}`
   ];
-  const normalized = normalizeReason(learnerMessage);
-
-  if (/わかりました|分かりました|なるほど|理解しました|了解|そういうこと/.test(normalized)) {
-    transcript.push("Understanding: learner acknowledged the point.");
-  }
-
   return transcript.join("\n");
 }
 
@@ -575,13 +466,44 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     }
 
     const existingMessages = submittedStatementResult.messages ?? [];
-    const learnerTurnCount = existingMessages.filter((message) => message.role === "learner").length;
-    const reply = buildIncorrectReply(statementForChat, learnerMessage, learnerTurnCount);
 
     setSessionActionStatus("saving");
     setErrorMessage(null);
 
     try {
+      const learnerChatResponse = await fetch("/api/learner-chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          currentQuestion: {
+            exam: learnerCase.exam,
+            theme: learnerCase.theme,
+            questionTitle: learnerCase.questionTitle,
+            questionStem: learnerCase.questionStem,
+            statements: learnerCase.statements
+          },
+          currentStatement: statementForChat,
+          statementExplanation: buildPointLine(statementForChat),
+          learnerMessage,
+          chatHistory: existingMessages
+        })
+      });
+
+      if (!learnerChatResponse.ok) {
+        throw new Error("Learner chat failed.");
+      }
+
+      const learnerChatPayload = (await learnerChatResponse.json()) as {
+        reply?: string;
+      };
+      const replyText = learnerChatPayload.reply?.trim();
+
+      if (!replyText) {
+        throw new Error("Learner chat returned empty reply.");
+      }
+
       const observation = buildStatementObservationInput({
         dailySessionId: dailySession.id,
         questionId: currentQuestionId,
@@ -590,7 +512,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
         statement: statementForChat,
         learnerChoice: statementChoice,
         learnerReason: learnerMessage,
-        learnerNote: buildTranscriptNote(existingMessages, learnerMessage, reply.text)
+        learnerNote: buildTranscriptNote(existingMessages, learnerMessage, replyText)
       });
 
       const response = await fetch("/api/daily-session/observation", {
@@ -616,9 +538,9 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
               messages: [
                 ...existingMessages,
                 { id: `${Date.now()}-learner`, role: "learner", text: learnerMessage },
-                { id: `${Date.now()}-coach`, role: "coach", text: reply.text }
+                { id: `${Date.now()}-coach`, role: "coach", text: replyText }
               ],
-              resolved: reply.resolved
+              resolved: false
             }
           : current
       );
