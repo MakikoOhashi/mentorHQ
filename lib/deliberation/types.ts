@@ -99,6 +99,23 @@ export type DeliberationResponse = {
   coach_decision: CoachDecision;
 };
 
+export type CoachMindSpeaker = "reading" | "memory" | "pattern" | "review";
+
+export type CoachMindTurn = {
+  id: string;
+  speaker: CoachMindSpeaker;
+  speakerLabel: string;
+  text: string;
+  source_observation_id: string;
+};
+
+export type CoachMindTurnOutput = Omit<CoachMindTurn, "id" | "source_observation_id">;
+
+export type CoachMindResponse = {
+  mode: "ai" | "fallback";
+  turns: CoachMindTurnOutput[];
+};
+
 export const DAILY_SESSION_STATUSES = ["draft", "active", "completed"] as const;
 
 export type DailySessionStatus = (typeof DAILY_SESSION_STATUSES)[number];

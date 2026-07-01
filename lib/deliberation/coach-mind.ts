@@ -1,0 +1,320 @@
+import { getDeliberationConfig, hasGeminiConfig } from "@/lib/deliberation/config";
+import { getLearnerCaseByQuestionId } from "@/lib/deliberation/mock";
+import type {
+  CoachMindResponse,
+  CoachMindSpeaker,
+  CoachMindTurnOutput,
+  ObservationEvent,
+  QuestionStatement
+} from "@/lib/deliberation/types";
+
+const GEMINI_API_ROOT = "https://generativelanguage.googleapis.com/v1beta/models";
+
+type RawGeminiResponse = {
+  candidates?: Array<{
+    content?: {
+      parts?: Array<{
+        text?: string;
+      }>;
+    };
+  }>;
+};
+
+const SPEAKER_LABELS: Record<CoachMindSpeaker, string> = {
+  reading: "Reading",
+  memory: "Memory",
+  pattern: "Pattern",
+  review: "Review"
+};
+
+const FALLBACK_TURNS: CoachMindTurnOutput[] = [
+  { speaker: "reading", speakerLabel: "Reading", text: "最新の回答を確認中です。" },
+  { speaker: "memory", speakerLabel: "Memory", text: "今日の流れと比較しています。" },
+  { speaker: "pattern", speakerLabel: "Pattern", text: "傾向はまだ保留します。" },
+  { speaker: "review", speakerLabel: "Review", text: "Daily Review で確認します。" }
+];
+
+function truncateForLog(value: string, maxLength = 1000): string {
+  return value.length > maxLength ? `${value.slice(0, maxLength)}…[truncated]` : value;
+}
+
+function sanitizeText(value: string): string {
+  return value.replace(/\r\n/g, "\n").trim();
+}
+
+function parseLearnerChatHistory(note: string): Array<{ role: "learner" | "coach"; text: string }> {
+  const messages: Array<{ role: "learner" | "coach"; text: string }> = [];
+
+  note
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .forEach((line) => {
+      if (line.startsWith("Learner: ")) {
+        messages.push({ role: "learner", text: line.slice("Learner: ".length).trim() });
+        return;
+      }
+
+      if (line.startsWith("Coach: ")) {
+        messages.push({ role: "coach", text: line.slice("Coach: ".length).trim() });
+      }
+    });
+
+  return messages;
+}
+
+function buildSystemInstruction(): string {
+  return [
+    "あなたは MentorHQ の AI Coach Mind です。",
+    "目的は、Observation を読み、Reading → Memory → Pattern → Review の順で短い agent chain を作ることです。",
+    "これは学習者向けの解説ではありません。右側で裏側の仮説更新を表示する内部 thought stream です。",
+    "各 agent は前の agent の発言を読んでから発言してください。",
+    "問題解説をしない。学習者への直接指導をしない。Daily Review の結論を先に出さない。",
+    "1 agent あたり 1〜2 文。長文禁止。毎回同じことを言わない。",
+    "Reading は最新 Observation だけを見る。",
+    "Memory は今日の過去 Observation と比較する。",
+    "Pattern は Reading と Memory を受けて仮説を少し更新する。",
+    "Review は結論を出さず、Daily Review に残す観点だけを短く述べる。",
+    "出力は JSON のみで、Markdown やコードフェンスは禁止です。"
+  ].join("\n");
+}
+
+function buildUserPrompt(params: {
+  latestObservation: ObservationEvent;
+  recentObservations: ObservationEvent[];
+  currentQuestion: {
+    exam: string;
+    theme: string;
+    questionTitle: string;
+    questionStem: string;
+  } | null;
+  currentStatement: QuestionStatement | null;
+  learnerChatHistory: Array<{ role: "learner" | "coach"; text: string }>;
+  existingThoughts: CoachMindTurnOutput[];
+}): string {
+  const latestObservation = {
+    ...params.latestObservation,
+    note: params.latestObservation.note,
+    observation_note: params.latestObservation.observation_note
+  };
+
+  return `次の情報をもとに、agent chain を 4 turns で生成してください。
+
+出力 shape:
+{
+  "turns": [
+    { "speaker": "reading", "speakerLabel": "Reading", "text": "..." },
+    { "speaker": "memory", "speakerLabel": "Memory", "text": "..." },
+    { "speaker": "pattern", "speakerLabel": "Pattern", "text": "..." },
+    { "speaker": "review", "speakerLabel": "Review", "text": "..." }
+  ]
+}
+
+ルール:
+- turns は必ず reading, memory, pattern, review の順
+- 各 text は日本語で 1〜2 文
+- Reading は latestObservation と learnerChatHistory を中心に書く
+- Memory は recentObservations と Reading の発言を受けて書く
+- Pattern は Reading と Memory を受けて仮説を少しだけ更新する
+- Review は結論を出さず、あとで Review に残す観点だけを書く
+- currentQuestion と currentStatement は文脈として使ってよいが、問題解説はしない
+- existingThoughts と同じ表現の繰り返しは避ける
+
+currentQuestion:
+${JSON.stringify(params.currentQuestion, null, 2)}
+
+currentStatement:
+${JSON.stringify(params.currentStatement, null, 2)}
+
+latestObservation:
+${JSON.stringify(latestObservation, null, 2)}
+
+recentObservations:
+${JSON.stringify(params.recentObservations, null, 2)}
+
+learnerChatHistory:
+${JSON.stringify(params.learnerChatHistory, null, 2)}
+
+existingThoughts:
+${JSON.stringify(params.existingThoughts, null, 2)}
+`;
+}
+
+function parseJsonBlock(text: string): unknown {
+  const fencedMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  const jsonText = fencedMatch?.[1] ?? text;
+  return JSON.parse(jsonText);
+}
+
+function sanitizeTurns(raw: unknown): CoachMindTurnOutput[] | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+
+  const turns = (raw as { turns?: unknown[] }).turns;
+  if (!Array.isArray(turns) || turns.length !== 4) {
+    return null;
+  }
+
+  const expectedSpeakers: CoachMindSpeaker[] = ["reading", "memory", "pattern", "review"];
+  const sanitized = turns.map((turn, index) => {
+    if (!turn || typeof turn !== "object") {
+      return null;
+    }
+
+    const candidate = turn as Partial<CoachMindTurnOutput>;
+    const expectedSpeaker = expectedSpeakers[index];
+    const text = typeof candidate.text === "string" ? sanitizeText(candidate.text) : "";
+
+    if (
+      candidate.speaker !== expectedSpeaker ||
+      candidate.speakerLabel !== SPEAKER_LABELS[expectedSpeaker] ||
+      !text
+    ) {
+      return null;
+    }
+
+    return {
+      speaker: expectedSpeaker,
+      speakerLabel: SPEAKER_LABELS[expectedSpeaker],
+      text
+    } satisfies CoachMindTurnOutput;
+  });
+
+  return sanitized.every((turn) => turn !== null) ? sanitized : null;
+}
+
+export async function generateCoachMindTurns(params: {
+  latestObservation: ObservationEvent;
+  recentObservations: ObservationEvent[];
+  existingThoughts?: CoachMindTurnOutput[];
+}): Promise<CoachMindResponse> {
+  const config = getDeliberationConfig();
+  const learnerCase = getLearnerCaseByQuestionId(params.latestObservation.question_id);
+  const currentStatement =
+    learnerCase && params.latestObservation.statement_index
+      ? learnerCase.statements[params.latestObservation.statement_index - 1] ?? null
+      : null;
+  const learnerChatHistory = parseLearnerChatHistory(params.latestObservation.note);
+
+  if (!hasGeminiConfig(config)) {
+    return {
+      mode: "fallback",
+      turns: FALLBACK_TURNS
+    };
+  }
+
+  try {
+    const prompt = buildUserPrompt({
+      latestObservation: params.latestObservation,
+      recentObservations: params.recentObservations,
+      currentQuestion: learnerCase
+        ? {
+            exam: learnerCase.exam,
+            theme: learnerCase.theme,
+            questionTitle: learnerCase.questionTitle,
+            questionStem: learnerCase.questionStem
+          }
+        : null,
+      currentStatement,
+      learnerChatHistory,
+      existingThoughts: params.existingThoughts ?? []
+    });
+
+    console.info("[coach-mind][gemini] request", {
+      latestObservationId: params.latestObservation.id,
+      recentObservationCount: params.recentObservations.length,
+      promptPreview: truncateForLog(prompt)
+    });
+
+    const response = await fetch(
+      `${GEMINI_API_ROOT}/${encodeURIComponent(config.model)}:generateContent?key=${encodeURIComponent(config.apiKey)}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          systemInstruction: {
+            parts: [
+              {
+                text: buildSystemInstruction()
+              }
+            ]
+          },
+          contents: [
+            {
+              role: "user",
+              parts: [
+                {
+                  text: prompt
+                }
+              ]
+            }
+          ],
+          generationConfig: {
+            temperature: 0.45,
+            responseMimeType: "application/json"
+          }
+        })
+      }
+    );
+
+    if (!response.ok) {
+      const responseBody = await response.text();
+
+      console.error("[coach-mind][gemini] non-ok response", {
+        status: response.status,
+        statusText: response.statusText,
+        body: truncateForLog(responseBody)
+      });
+
+      return {
+        mode: "fallback",
+        turns: FALLBACK_TURNS
+      };
+    }
+
+    const responseBody = await response.text();
+    const payload = JSON.parse(responseBody) as RawGeminiResponse;
+    const text = payload.candidates?.[0]?.content?.parts?.map((part) => part.text ?? "").join("") ?? "";
+
+    console.info("[coach-mind][gemini] response", {
+      latestObservationId: params.latestObservation.id,
+      textPreview: truncateForLog(text)
+    });
+
+    if (!text) {
+      return {
+        mode: "fallback",
+        turns: FALLBACK_TURNS
+      };
+    }
+
+    const parsed = parseJsonBlock(text);
+    const turns = sanitizeTurns(parsed);
+
+    if (!turns) {
+      console.warn("[coach-mind][gemini] sanitize failed", {
+        latestObservationId: params.latestObservation.id,
+        rawText: truncateForLog(text)
+      });
+
+      return {
+        mode: "fallback",
+        turns: FALLBACK_TURNS
+      };
+    }
+
+    return {
+      mode: "ai",
+      turns
+    };
+  } catch (error) {
+    console.error("[coach-mind][gemini] request failed", error);
+    return {
+      mode: "fallback",
+      turns: FALLBACK_TURNS
+    };
+  }
+}

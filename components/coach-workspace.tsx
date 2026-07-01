@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { buildCoachConversation } from "@/lib/deliberation/coach-conversation";
 import { buildStatementObservationInput } from "@/lib/deliberation/observation";
 import type {
+  CoachMindResponse,
+  CoachMindTurn,
   DailyReview,
   DailySession,
   LearnerCase,
@@ -193,7 +194,13 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const [submittedStatementResult, setSubmittedStatementResult] = useState<StatementResult | null>(null);
   const [queuedNextPayload, setQueuedNextPayload] = useState<DailySessionPayload | null>(null);
   const [visibleThoughtIds, setVisibleThoughtIds] = useState<string[]>([]);
+  const [coachMindTurns, setCoachMindTurns] = useState<CoachMindTurn[]>([]);
+  const [coachMindStatus, setCoachMindStatus] = useState<"idle" | "generating">("idle");
   const revealTimeoutIdsRef = useRef<number[]>([]);
+  const generatedThoughtObservationIdsRef = useRef<Set<string>>(new Set());
+  const generatingThoughtObservationIdsRef = useRef<Set<string>>(new Set());
+  const coachMindTurnsRef = useRef<CoachMindTurn[]>([]);
+  const previousSessionIdRef = useRef<string | null>(null);
 
   const applyDailySessionPayload = useCallback((payload: DailySessionPayload) => {
     setDailySession(payload.session);
@@ -226,6 +233,12 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     setFinalResult(null);
     setSubmittedStatementResult(null);
     setQueuedNextPayload(null);
+    setCoachMindTurns([]);
+    setCoachMindStatus("idle");
+    setVisibleThoughtIds([]);
+    generatedThoughtObservationIdsRef.current = new Set();
+    generatingThoughtObservationIdsRef.current = new Set();
+    coachMindTurnsRef.current = [];
   }, [initialCase]);
 
   useEffect(() => {
@@ -279,16 +292,41 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     [currentQuestionObservations]
   );
 
-  const coachConversation = useMemo(() => buildCoachConversation(observations), [observations]);
   const visibleTurns = useMemo(
-    () => coachConversation.filter((turn) => visibleThoughtIds.includes(turn.id)),
-    [coachConversation, visibleThoughtIds]
+    () => coachMindTurns.filter((turn) => visibleThoughtIds.includes(turn.id)),
+    [coachMindTurns, visibleThoughtIds]
   );
   const isCoachThinking =
-    sessionActionStatus !== "idle" || reviewActionStatus === "generating" || planActionStatus === "generating";
+    sessionActionStatus !== "idle" ||
+    reviewActionStatus === "generating" ||
+    planActionStatus === "generating" ||
+    coachMindStatus === "generating";
 
   useEffect(() => {
-    const nextIds = coachConversation.map((turn) => turn.id);
+    coachMindTurnsRef.current = coachMindTurns;
+  }, [coachMindTurns]);
+
+  useEffect(() => {
+    const nextSessionId = dailySession?.id ?? null;
+
+    if (previousSessionIdRef.current === null) {
+      previousSessionIdRef.current = nextSessionId;
+      return;
+    }
+
+    if (previousSessionIdRef.current !== nextSessionId) {
+      previousSessionIdRef.current = nextSessionId;
+      setCoachMindTurns([]);
+      setCoachMindStatus("idle");
+      setVisibleThoughtIds([]);
+      generatedThoughtObservationIdsRef.current = new Set();
+      generatingThoughtObservationIdsRef.current = new Set();
+      coachMindTurnsRef.current = [];
+    }
+  }, [dailySession?.id]);
+
+  useEffect(() => {
+    const nextIds = coachMindTurns.map((turn) => turn.id);
 
     setVisibleThoughtIds((current) => {
       const retainedIds = current.filter((id) => nextIds.includes(id)).slice(-MAX_VISIBLE_THOUGHTS);
@@ -319,7 +357,94 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       revealTimeoutIdsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
       revealTimeoutIdsRef.current = [];
     };
-  }, [coachConversation]);
+  }, [coachMindTurns]);
+
+  useEffect(() => {
+    if (observations.length === 0) {
+      setCoachMindTurns([]);
+      setCoachMindStatus("idle");
+      generatedThoughtObservationIdsRef.current = new Set();
+      generatingThoughtObservationIdsRef.current = new Set();
+      coachMindTurnsRef.current = [];
+      return;
+    }
+
+    const pendingObservations = observations.filter(
+      (observation) =>
+        !generatedThoughtObservationIdsRef.current.has(observation.id) &&
+        !generatingThoughtObservationIdsRef.current.has(observation.id)
+    );
+
+    if (pendingObservations.length === 0) {
+      return;
+    }
+
+    pendingObservations.forEach((observation) => generatingThoughtObservationIdsRef.current.add(observation.id));
+
+    let cancelled = false;
+
+    async function generateThoughts() {
+      setCoachMindStatus("generating");
+
+      try {
+        for (const observation of pendingObservations) {
+          const observationIndex = observations.findIndex((candidate) => candidate.id === observation.id);
+          const recentObservations =
+            observationIndex >= 0 ? observations.slice(Math.max(0, observationIndex - 4), observationIndex + 1) : [observation];
+
+          const response = await fetch("/api/coach-mind", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              latestObservation: observation,
+              recentObservations,
+              existingThoughts: coachMindTurnsRef.current.slice(-8).map((turn) => ({
+                speaker: turn.speaker,
+                speakerLabel: turn.speakerLabel,
+                text: turn.text
+              }))
+            })
+          });
+
+          if (!response.ok) {
+            throw new Error("Coach mind generation failed.");
+          }
+
+          const payload = (await response.json()) as CoachMindResponse;
+          const nextTurns = payload.turns.map((turn, index) => ({
+            ...turn,
+            id: `${observation.id}-${turn.speaker}-${index}`,
+            source_observation_id: observation.id
+          })) satisfies CoachMindTurn[];
+
+          if (cancelled) {
+            return;
+          }
+
+          generatedThoughtObservationIdsRef.current.add(observation.id);
+          generatingThoughtObservationIdsRef.current.delete(observation.id);
+          coachMindTurnsRef.current = [...coachMindTurnsRef.current, ...nextTurns];
+          setCoachMindTurns((current) => [...current, ...nextTurns]);
+        }
+      } catch {
+        pendingObservations.forEach((observation) => {
+          generatingThoughtObservationIdsRef.current.delete(observation.id);
+        });
+      } finally {
+        if (!cancelled) {
+          setCoachMindStatus(generatingThoughtObservationIdsRef.current.size > 0 ? "generating" : "idle");
+        }
+      }
+    }
+
+    void generateThoughts();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [observations]);
 
   useEffect(() => {
     if (
