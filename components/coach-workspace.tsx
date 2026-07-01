@@ -160,65 +160,80 @@ function buildIncorrectReply(
   const normalized = normalizeReason(message);
   const pointFocus = extractPointFocus(statement);
   const explanation = statement.explanation.replace(/\s+/g, " ").trim();
+  const articleNumber = /相続|熟慮期間|放棄/.test(statement.text) ? "民法915条" : null;
 
   if (/わかりました|分かりました|なるほど|理解しました|了解|そういうこと/.test(normalized)) {
     return {
-      text: "はい。\nでは次の肢へ進みましょう。",
+      text: "はい。\n理解できたら次の肢へ進みましょう。",
       resolved: true
     };
   }
 
-  if (/熟慮期間|何ですか|なんですか|とは/.test(normalized)) {
+  if (/(熟慮期間).*(何|なん|とは)|何.*(熟慮期間)|熟慮期間って/.test(normalized)) {
     return {
       text: "熟慮期間とは、相続を受けるか放棄するかを考えるために法律で認められた期間です。\n原則3か月あります。",
-      resolved: learnerTurnCount >= 1
+      resolved: false
     };
   }
 
   if (/開始してから|相続開始|開始後/.test(normalized)) {
     return {
       text: "開始後ならいつでもではありません。\n自己のために相続の開始があったことを知った日から3か月以内です。\nこの問題では「知った時から」がポイントです。",
-      resolved: learnerTurnCount >= 1
+      resolved: false
+    };
+  }
+
+  if (/(開始点|起算点).*(何|なん|とは)|何.*(開始点|起算点)/.test(normalized)) {
+    return {
+      text: "開始点とは、期間をいつから数え始めるかという基準の時点です。\n相続放棄では、自己のために相続の開始があったことを知った日が基準になります。",
+      resolved: false
+    };
+  }
+
+  if (/民法.*何条|何条.*民法|条文|何条/.test(normalized) && articleNumber) {
+    return {
+      text: `${articleNumber}です。\n相続の承認・放棄の熟慮期間を定めています。`,
+      resolved: false
     };
   }
 
   if (/開始点|起算点|いつから|知った時/.test(normalized)) {
     return {
-      text: `開始点は ${pointFocus} です。\nこの肢ではそこだけ押さえれば十分です。`,
-      resolved: learnerTurnCount >= 1
+      text: `開始点は ${pointFocus} です。\nこの問題では「知った時から」が基準になります。`,
+      resolved: false
     };
   }
 
   if (/3か月|3ヶ月|数字/.test(normalized)) {
     return {
       text: `3か月で合っています。\n違うのは ${pointFocus} です。`,
-      resolved: learnerTurnCount >= 1
+      resolved: false
     };
   }
 
   if (/家庭裁判所|申述|裁判所/.test(normalized)) {
     return {
       text: "はい。相続放棄は家庭裁判所への申述が必要です。\n他の相続人へ伝えるだけでは足りません。",
-      resolved: learnerTurnCount >= 1
+      resolved: false
     };
   }
 
   if (/条件|ただし|場合|要件/.test(normalized)) {
     return {
-      text: `この肢のポイントは ${pointFocus} です。\n条件はそこにかかっています。`,
-      resolved: learnerTurnCount >= 1
+      text: "要件が付く場合は、その条件を満たすときだけ結論が成り立ちます。\nこの問題では条件がどこにかかるかを確認してください。",
+      resolved: false
     };
   }
 
   if (learnerTurnCount >= 1) {
     return {
-      text: `${explanation}\nでは次の肢へ進みましょう。`,
-      resolved: true
+      text: explanation,
+      resolved: false
     };
   }
 
   return {
-    text: `${explanation}\nこの問題では ${pointFocus} を確認してください。`,
+    text: `${explanation}\n必要なら、気になる用語や条文をそのまま聞いてください。`,
     resolved: false
   };
 }
