@@ -136,21 +136,7 @@ function normalizeReason(reason: string): string {
 }
 
 function buildPointLine(statement: LearnerCase["statements"][number]): string {
-  const match = statement.explanation.match(/「[^」]+」/);
-  if (match) {
-    return `${match[0]} が決め手でした。`;
-  }
-
-  const conciseExplanation = statement.explanation.replace(/\s+/g, " ");
-  if (/条件|要件|ただし|場合/.test(conciseExplanation)) {
-    return "決め手は条件句でした。";
-  }
-
-  if (conciseExplanation.length <= 28) {
-    return conciseExplanation;
-  }
-
-  return `${conciseExplanation.slice(0, 28)}...`;
+  return statement.explanation.replace(/\s+/g, " ").trim();
 }
 
 function extractPointFocus(statement: LearnerCase["statements"][number]): string {
