@@ -159,11 +159,26 @@ function buildIncorrectReply(
 ): { text: string; resolved: boolean } {
   const normalized = normalizeReason(message);
   const pointFocus = extractPointFocus(statement);
+  const explanation = statement.explanation.replace(/\s+/g, " ").trim();
 
   if (/わかりました|分かりました|なるほど|理解しました|了解|そういうこと/.test(normalized)) {
     return {
       text: "はい。\nでは次の肢へ進みましょう。",
       resolved: true
+    };
+  }
+
+  if (/熟慮期間|何ですか|なんですか|とは/.test(normalized)) {
+    return {
+      text: "熟慮期間とは、相続を受けるか放棄するかを考えるために法律で認められた期間です。\n原則3か月あります。",
+      resolved: learnerTurnCount >= 1
+    };
+  }
+
+  if (/開始してから|相続開始|開始後/.test(normalized)) {
+    return {
+      text: "開始後ならいつでもではありません。\n自己のために相続の開始があったことを知った日から3か月以内です。\nこの問題では「知った時から」がポイントです。",
+      resolved: learnerTurnCount >= 1
     };
   }
 
@@ -197,13 +212,13 @@ function buildIncorrectReply(
 
   if (learnerTurnCount >= 1) {
     return {
-      text: `${pointFocus} を押さえれば十分です。\nでは次の肢へ進みましょう。`,
+      text: `${explanation}\nでは次の肢へ進みましょう。`,
       resolved: true
     };
   }
 
   return {
-    text: `ポイントは ${pointFocus} です。\nこの肢ではそこを確認してください。`,
+    text: `${explanation}\nこの問題では ${pointFocus} を確認してください。`,
     resolved: false
   };
 }
