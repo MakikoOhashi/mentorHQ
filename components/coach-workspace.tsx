@@ -872,7 +872,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
 
                   {questionPhase === "statement-result" ? (
                     sessionActionStatus === "saving" ? (
-                      <div className="feedback-next-hint">AI Coach Mind が右側で確認しています。</div>
+                      <div className="feedback-next-hint">考えています...</div>
                     ) : submittedStatementResult ? (
                       submittedStatementResult.mode === "correct" ? (
                         <section className="feedback-card feedback-card--good">
