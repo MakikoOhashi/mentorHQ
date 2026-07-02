@@ -331,7 +331,12 @@ function toSerializableObservationEvent(snapshot: QueryDocumentSnapshot): Observ
         : null,
     intervention_type: data.intervention_type,
     misunderstanding_type: data.misunderstanding_type,
-    confidence: typeof data.confidence === "number" ? data.confidence : null,
+    answer_signal_score:
+      typeof data.answer_signal_score === "number"
+        ? data.answer_signal_score
+        : typeof data.confidence === "number"
+          ? data.confidence
+          : null,
     observation_note: typeof data.observation_note === "string" ? data.observation_note : data.note,
     note: data.note,
     created_at: toSerializableCreatedAt(data.created_at)
@@ -857,7 +862,7 @@ async function createObservationEvent(observation: ObservationEventInput): Promi
     reasoning_style: observation.reasoning_style ?? null,
     intervention_type: observation.intervention_type,
     misunderstanding_type: observation.misunderstanding_type,
-    confidence: observation.confidence,
+    answer_signal_score: observation.answer_signal_score,
     observation_note: observation.observation_note ?? observation.note,
     note: observation.note,
     created_at: new Date().toISOString()
@@ -879,7 +884,7 @@ async function createObservationEvent(observation: ObservationEventInput): Promi
       reasoning_style: observation.reasoning_style ?? null,
       intervention_type: observation.intervention_type,
       misunderstanding_type: observation.misunderstanding_type,
-      confidence: observation.confidence,
+      answer_signal_score: observation.answer_signal_score,
       observation_note: observation.observation_note ?? observation.note,
       note: observation.note,
       created_at: FieldValue.serverTimestamp()

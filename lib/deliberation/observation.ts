@@ -49,7 +49,7 @@ export function detectMisunderstandingTypeFromDeliberation(
   return "unknown";
 }
 
-export function detectObservationConfidence(deliberationEvents: DeliberationEvent[]): number | null {
+export function detectObservationSignalScore(deliberationEvents: DeliberationEvent[]): number | null {
   const latestConfidenceEvent = [...deliberationEvents]
     .reverse()
     .find((event) => typeof event.confidence_after === "number");
@@ -98,7 +98,7 @@ export function buildObservationInput(params: {
     question_index: params.questionIndex,
     intervention_type: params.coachDecision.selected_intervention,
     misunderstanding_type: misunderstandingType,
-    confidence: detectObservationConfidence(params.deliberationEvents),
+    answer_signal_score: detectObservationSignalScore(params.deliberationEvents),
     note: buildObservationNote(misunderstandingType, params.deliberationEvents)
   };
 }
@@ -176,7 +176,7 @@ function buildStatementObservationNote(
 
   if (!normalizedReason) {
     return isCorrect
-      ? `${correctnessPrefix} 肢${statementIndex}は理由入力なしで正しく判断できています。`
+      ? `${correctnessPrefix} 肢${statementIndex}は正しく判断できています。`
       : `${correctnessPrefix} 肢${statementIndex}は追加質問の余地がありそうです。`;
   }
 
@@ -209,7 +209,7 @@ function buildStatementObservationNote(
     : `${correctnessPrefix} 肢${statementIndex}は迷いを残しながら判断しています。`;
 }
 
-function detectStatementConfidence(reasoningStyle: ReasoningStyle, reason: string): number {
+function detectStatementSignalScore(reasoningStyle: ReasoningStyle, reason: string): number {
   const base =
     reasoningStyle === "condition_based"
       ? 0.76
@@ -238,9 +238,15 @@ export function buildStatementObservationInput(params: {
   reasoningStyle?: ReasoningStyle;
 }): ObservationEventInput {
   const learnerReason = params.learnerReason?.trim() ?? "";
-  const reasoningStyle = params.reasoningStyle ?? detectReasoningStyle(learnerReason);
-  const misunderstandingType = getReasoningMisunderstandingType(reasoningStyle);
   const correctness = detectStatementCorrectness(params.statement, params.learnerChoice);
+  const reasoningStyle =
+    params.reasoningStyle ??
+    (learnerReason
+      ? detectReasoningStyle(learnerReason)
+      : correctness === "correct"
+        ? "intuition"
+        : "uncertainty");
+  const misunderstandingType = getReasoningMisunderstandingType(reasoningStyle);
   const observationNote = buildStatementObservationNote(
     params.statementIndex,
     reasoningStyle,
@@ -259,7 +265,7 @@ export function buildStatementObservationInput(params: {
     reasoning_style: reasoningStyle,
     intervention_type: getReasoningIntervention(reasoningStyle),
     misunderstanding_type: misunderstandingType,
-    confidence: detectStatementConfidence(reasoningStyle, learnerReason),
+    answer_signal_score: detectStatementSignalScore(reasoningStyle, learnerReason),
     observation_note: observationNote,
     note: params.learnerNote?.trim() ? params.learnerNote.trim() : observationNote
   };

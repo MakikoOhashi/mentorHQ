@@ -182,7 +182,7 @@ export type ObservationEvent = {
   reasoning_style: ReasoningStyle | null;
   intervention_type: SelectedIntervention;
   misunderstanding_type: ObservationMisunderstandingType;
-  confidence: number | null;
+  answer_signal_score: number | null;
   observation_note: string;
   note: string;
   created_at: string | null;
@@ -199,7 +199,7 @@ export type ObservationEventInput = {
   reasoning_style?: ReasoningStyle | null;
   intervention_type: SelectedIntervention;
   misunderstanding_type: ObservationMisunderstandingType;
-  confidence: number | null;
+  answer_signal_score: number | null;
   observation_note?: string;
   note: string;
 };

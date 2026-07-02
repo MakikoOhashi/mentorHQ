@@ -3,7 +3,7 @@ type AgentReport = {
   finding: string;
   risk: string;
   recommendation: string;
-  confidence: number;
+  signalScore: number;
   evidence: string[];
 };
 
@@ -32,7 +32,7 @@ const workspace = {
       finding: "起算点誤認の可能性が高い",
       risk: "期間だけに反応し、起算点を確認していない",
       recommendation: "その3ヶ月をいつから数えると思ったか確認する",
-      confidence: 0.86,
+      signalScore: 0.86,
       evidence: [
         "reflection が「3ヶ月以内」にのみ言及している",
         "起算点に関する記述がない"
@@ -43,7 +43,7 @@ const workspace = {
       finding: "期限・期間問題で同種の誤りが再発している",
       risk: "単発ミスではなく、法的期間の読み方に弱点がある",
       recommendation: "短い確認質問で起算点を言語化させる",
-      confidence: 0.78,
+      signalScore: 0.78,
       evidence: ["prior_cases: 2026-05-30", "prior_cases: 2026-06-03"]
     },
     {
@@ -51,7 +51,7 @@ const workspace = {
       finding: "今日の負荷はやや高い",
       risk: "長い解説を入れると処理負荷が上がる",
       recommendation: "解説ではなく1問だけ確認質問にする",
-      confidence: 0.72,
+      signalScore: 0.72,
       evidence: ["recent_accuracy: unstable", "session_load: high"]
     }
   ] satisfies AgentReport[],
@@ -184,10 +184,10 @@ export default function Home() {
                 <section className="agent-card" key={report.agentName}>
                   <div className="agent-topline">
                     <h4>{report.agentName}</h4>
-                    <span>{Math.round(report.confidence * 100)}%</span>
+                    <span>{Math.round(report.signalScore * 100)}%</span>
                   </div>
-                  <div className="confidence-bar">
-                    <span style={{ width: `${report.confidence * 100}%` }} />
+                  <div className="signal-score-bar">
+                    <span style={{ width: `${report.signalScore * 100}%` }} />
                   </div>
                   <dl className="detail-list">
                     <div>

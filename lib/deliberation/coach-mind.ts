@@ -74,6 +74,8 @@ function buildSystemInstruction(): string {
     "問題解説をしない。学習者への直接指導をしない。Daily Review 本文みたいにしない。",
     "1 agent あたり 1〜2 文。長文禁止。敬語禁止。報告書禁止。",
     "『学習者は〜』『Observationでは〜』『可能性が考えられます』は禁止。",
+    "answer_signal_score は内部観測用の補助スコアです。学習者の自信や不安を表す値ではありません。",
+    "answer_signal_score だけを根拠に『自信が低い』『不安そう』『偶然正解した』などと言ってはいけません。",
     "Reading は今回だけ見る。",
     "Memory は今日の流れと比べる。",
     "Pattern は Reading と Memory を受けて仮説を少しだけ更新する。",
@@ -125,10 +127,17 @@ function buildUserPrompt(params: {
 - Memory は recentObservations と Reading の発言を受けて書く
 - Pattern は Reading と Memory を受けて仮説を少しだけ更新する
 - Review は結論を出さず、保留だけ置く
+- answer_signal_score は内部観測用の補助スコアで、学習者の自信ではない
+- answer_signal_score を心理状態として解釈しない
+- この値だけを根拠に「自信が低い」「不安」「偶然正解」「知識が曖昧」と言わない
+- Reading は観測できた事実だけを書く
+- Memory は過去 observation との比較だけを書く
+- Pattern は観測根拠があるときだけ最小限の仮説を書く
+- Review は断定しない
 - learner_reason が空でも、理由が無かったと決めつけない
 - 特に reasonInputRequested が false のときは、理由入力 UI 自体が無かった前提で扱う
 - reasonInputRequested が false のケースで「理由は入力されませんでした」「理由がありません」などは禁止
-- その場合は、選択結果・正誤・自信度・質問有無だけから読む
+- その場合は、選択結果・正誤・answer_signal_score・質問有無だけから読む
 - currentQuestion と currentStatement は文脈として使ってよいが、問題解説はしない
 - existingThoughts と同じ表現の繰り返しは避ける
 - 敬語禁止。報告書禁止
@@ -158,6 +167,16 @@ ${JSON.stringify(
         reasonInputRequested
           ? "この observation では、必要なら理由や質問を入力できた。"
           : "この observation では、理由入力 UI 自体を出していない可能性が高い。"
+    },
+    null,
+    2
+  )}
+
+answerSignalScoreContext:
+${JSON.stringify(
+    {
+      answer_signal_score: params.latestObservation.answer_signal_score,
+      note: "内部観測用の補助スコア。学習者の心理的な自信ではない。"
     },
     null,
     2
