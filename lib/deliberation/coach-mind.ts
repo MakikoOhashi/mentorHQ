@@ -63,22 +63,6 @@ function parseLearnerChatHistory(note: string): Array<{ role: "learner" | "coach
   return messages;
 }
 
-function buildSignalScoreMemo(score: number | null): string {
-  if (typeof score !== "number") {
-    return "今回だけでは判断材料が少ない。";
-  }
-
-  if (score >= 0.75) {
-    return "観測は比較的そろっている。";
-  }
-
-  if (score >= 0.55) {
-    return "観測は少しある。";
-  }
-
-  return "今回だけでは判断材料が少ない。";
-}
-
 function buildObservationPromptContext(observation: ObservationEvent): {
   question_id: string;
   statement_index: number | null;
@@ -89,7 +73,6 @@ function buildObservationPromptContext(observation: ObservationEvent): {
   misunderstanding_type: typeof observation.misunderstanding_type;
   observation_note: string;
   learner_note: string;
-  signal_score_memo: string;
 } {
   return {
     question_id: observation.question_id,
@@ -100,8 +83,7 @@ function buildObservationPromptContext(observation: ObservationEvent): {
     reasoning_style: observation.reasoning_style,
     misunderstanding_type: observation.misunderstanding_type,
     observation_note: observation.observation_note,
-    learner_note: observation.note,
-    signal_score_memo: buildSignalScoreMemo(observation.answer_signal_score)
+    learner_note: observation.note
   };
 }
 
@@ -139,8 +121,6 @@ function buildUserPrompt(params: {
   learnerChatHistory: Array<{ role: "learner" | "coach"; text: string }>;
   existingThoughts: CoachMindTurnOutput[];
 }): string {
-  const reasonInputRequested = params.latestObservation.correct_or_wrong === "wrong";
-  const learnerReasonAvailable = (params.latestObservation.learner_reason ?? "").trim().length > 0;
   const latestObservation = buildObservationPromptContext(params.latestObservation);
   const recentObservations = params.recentObservations.map((observation) => buildObservationPromptContext(observation));
 
@@ -166,16 +146,14 @@ function buildUserPrompt(params: {
 - Memory は recentObservations と Reading の発言を受けて書く
 - Pattern は Reading と Memory を受けて仮説を少しだけ更新する
 - Review は結論を出さず、保留だけ置く
-- signal_score_memo は内部観測の量感を自然文にした補助メモで、心理状態ではない
-- これを根拠に「自信が低い」「不安」「偶然正解」「知識が曖昧」と言わない
 - Reading は観測できた事実だけを書く
 - Memory は過去 observation との比較だけを書く
 - Pattern は観測根拠があるときだけ最小限の仮説を書く
 - Review は断定しない
 - learner_reason が空でも、理由が無かったと決めつけない
-- 特に reasonInputRequested が false のときは、理由入力 UI 自体が無かった前提で扱う
-- reasonInputRequested が false のケースで「理由は入力されませんでした」「理由がありません」などは禁止
-- その場合は、選択結果・正誤・signal_score_memo・質問有無だけから読む
+- 理由入力UIの有無、フォーム状態、ボタン状態など UI 実装の話はしない
+- answer_signal_score など内部メトリクスの数値は使わないし、話題にしない
+- その場合は、選択結果・正誤・質問有無・今日までの observation だけから読む
 - currentQuestion と currentStatement は文脈として使ってよいが、問題解説はしない
 - existingThoughts と同じ表現の繰り返しは避ける
 - 敬語禁止。報告書禁止
@@ -195,30 +173,6 @@ ${JSON.stringify(params.currentStatement, null, 2)}
 
 latestObservation:
 ${JSON.stringify(latestObservation, null, 2)}
-
-reasonInputContext:
-${JSON.stringify(
-    {
-      reasonInputRequested,
-      learnerReasonAvailable,
-      note:
-        reasonInputRequested
-          ? "この observation では、必要なら理由や質問を入力できた。"
-          : "この observation では、理由入力 UI 自体を出していない可能性が高い。"
-    },
-    null,
-    2
-  )}
-
-answerSignalScoreContext:
-${JSON.stringify(
-    {
-      signal_score_memo: buildSignalScoreMemo(params.latestObservation.answer_signal_score),
-      note: "内部観測の量感を自然文にした補助メモ。心理的な自信ではない。"
-    },
-    null,
-    2
-  )}
 
 recentObservations:
 ${JSON.stringify(recentObservations, null, 2)}
