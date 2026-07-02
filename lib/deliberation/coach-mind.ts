@@ -28,10 +28,10 @@ const SPEAKER_LABELS: Record<CoachMindSpeaker, string> = {
 };
 
 const FALLBACK_TURNS: CoachMindTurnOutput[] = [
-  { speaker: "reading", speakerLabel: "Reading", text: "最新の回答を確認中です。" },
-  { speaker: "memory", speakerLabel: "Memory", text: "今日の流れと比較しています。" },
-  { speaker: "pattern", speakerLabel: "Pattern", text: "傾向はまだ保留します。" },
-  { speaker: "review", speakerLabel: "Review", text: "Daily Review で確認します。" }
+  { speaker: "reading", speakerLabel: "Reading", text: "今回はここで止まった。" },
+  { speaker: "memory", speakerLabel: "Memory", text: "たしかに。まだ比較材料が少ない。" },
+  { speaker: "pattern", speakerLabel: "Pattern", text: "それなら傾向は保留。" },
+  { speaker: "review", speakerLabel: "Review", text: "一旦保留。Review候補。" }
 ];
 
 function truncateForLog(value: string, maxLength = 1000): string {
@@ -67,14 +67,17 @@ function buildSystemInstruction(): string {
   return [
     "あなたは MentorHQ の AI Coach Mind です。",
     "目的は、Observation を読み、Reading → Memory → Pattern → Review の順で短い agent chain を作ることです。",
-    "これは学習者向けの解説ではありません。右側で裏側の仮説更新を表示する内部 thought stream です。",
-    "各 agent は前の agent の発言を読んでから発言してください。",
-    "問題解説をしない。学習者への直接指導をしない。Daily Review の結論を先に出さない。",
-    "1 agent あたり 1〜2 文。長文禁止。毎回同じことを言わない。",
-    "Reading は最新 Observation だけを見る。",
-    "Memory は今日の過去 Observation と比較する。",
-    "Pattern は Reading と Memory を受けて仮説を少し更新する。",
-    "Review は結論を出さず、Daily Review に残す観点だけを短く述べる。",
+    "これは人間への説明ではなく、AI agent 同士だけが読む working memory です。",
+    "文体は内部会話。短い独り言か会議メモにする。",
+    "各 agent は前の agent の発言に一度だけ軽く反応してから、自分の意見を言うこと。",
+    "反応は『たしかに。』『それなら。』『一旦保留。』のような短い一言でよい。",
+    "問題解説をしない。学習者への直接指導をしない。Daily Review 本文みたいにしない。",
+    "1 agent あたり 1〜2 文。長文禁止。敬語禁止。報告書禁止。",
+    "『学習者は〜』『Observationでは〜』『可能性が考えられます』は禁止。",
+    "Reading は今回だけ見る。",
+    "Memory は今日の流れと比べる。",
+    "Pattern は Reading と Memory を受けて仮説を少しだけ更新する。",
+    "Review は結論を出さず、保留だけ置く。",
     "出力は JSON のみで、Markdown やコードフェンスは禁止です。"
   ].join("\n");
 }
@@ -92,6 +95,8 @@ function buildUserPrompt(params: {
   learnerChatHistory: Array<{ role: "learner" | "coach"; text: string }>;
   existingThoughts: CoachMindTurnOutput[];
 }): string {
+  const reasonInputRequested = params.latestObservation.correct_or_wrong === "wrong";
+  const learnerReasonAvailable = (params.latestObservation.learner_reason ?? "").trim().length > 0;
   const latestObservation = {
     ...params.latestObservation,
     note: params.latestObservation.note,
@@ -113,12 +118,27 @@ function buildUserPrompt(params: {
 ルール:
 - turns は必ず reading, memory, pattern, review の順
 - 各 text は日本語で 1〜2 文
+- 文体は内部会話。会議中の短いメモにする
+- Reading 以外は、前の agent に一度だけ短く反応してから話す
+- 反応は短くてよい: 「たしかに。」「それなら。」「一旦保留。」
 - Reading は latestObservation と learnerChatHistory を中心に書く
 - Memory は recentObservations と Reading の発言を受けて書く
 - Pattern は Reading と Memory を受けて仮説を少しだけ更新する
-- Review は結論を出さず、あとで Review に残す観点だけを書く
+- Review は結論を出さず、保留だけ置く
+- learner_reason が空でも、理由が無かったと決めつけない
+- 特に reasonInputRequested が false のときは、理由入力 UI 自体が無かった前提で扱う
+- reasonInputRequested が false のケースで「理由は入力されませんでした」「理由がありません」などは禁止
+- その場合は、選択結果・正誤・自信度・質問有無だけから読む
 - currentQuestion と currentStatement は文脈として使ってよいが、問題解説はしない
 - existingThoughts と同じ表現の繰り返しは避ける
+- 敬語禁止。報告書禁止
+- 「学習者は〜」「Observationでは〜」「可能性が考えられます」は禁止
+
+温度感の例:
+- Reading: 「今回は『知った時』で止まった。」
+- Memory: 「たしかに。前は数字だった。」
+- Pattern: 「それなら用語で引っ掛かってるだけかも。」
+- Review: 「一旦保留。あと2問見たい。」
 
 currentQuestion:
 ${JSON.stringify(params.currentQuestion, null, 2)}
@@ -128,6 +148,20 @@ ${JSON.stringify(params.currentStatement, null, 2)}
 
 latestObservation:
 ${JSON.stringify(latestObservation, null, 2)}
+
+reasonInputContext:
+${JSON.stringify(
+    {
+      reasonInputRequested,
+      learnerReasonAvailable,
+      note:
+        reasonInputRequested
+          ? "この observation では、必要なら理由や質問を入力できた。"
+          : "この observation では、理由入力 UI 自体を出していない可能性が高い。"
+    },
+    null,
+    2
+  )}
 
 recentObservations:
 ${JSON.stringify(params.recentObservations, null, 2)}
