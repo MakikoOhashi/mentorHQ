@@ -141,6 +141,11 @@ function buildUserPrompt(params: {
   const recentObservations = params.recentObservations.map((observation) => buildObservationPromptContext(observation));
   const currentStatement = buildStatementPromptContext(params.currentStatement);
   const learnerChatHistory = params.learnerChatHistory.length > 0 ? params.learnerChatHistory : undefined;
+  const learnerChatHistorySection = learnerChatHistory
+    ? `
+learnerChatHistory:
+${JSON.stringify(learnerChatHistory, null, 2)}`
+    : "";
 
   return `次の情報をもとに、agent chain を 4 turns で生成してください。
 
@@ -160,8 +165,11 @@ function buildUserPrompt(params: {
 - 文体は内部会話。会議中の短いメモにする
 - Reading 以外は、前の agent に一度だけ短く反応してから話す
 - 反応は短くてよい: 「たしかに。」「それなら。」「一旦保留。」
-- Reading は latestObservation と learnerChatHistory を中心に書く
+- Reading は latestObservation を中心に書く
+- learnerChatHistory が実際に渡されている場合だけ、Reading でチャット内容に触れてよい
 - Memory は recentObservations と Reading の発言を受けて書く
+- Memory は比較できる observation がある場合だけ比較する
+- Memory は実際に渡されたチャット情報がある observation 同士だけでチャット比較をしてよい
 - Pattern は Reading と Memory を受けて、学習者モデルだけを少し更新する
 - Review は結論を出さず、保留だけ置く
 - Reading は観測できた事実だけを書く
@@ -178,6 +186,8 @@ function buildUserPrompt(params: {
 - 理由が入力されていないこと自体を話題にしない
 - 理由入力UI、reason フィールド、フォーム状態の話はしない
 - 質問情報が渡されていないときに「質問はなかった」と言わない
+- 「チャット履歴はない」「チャットは行われなかった」と言わない
+- 「質問していない」と言わない
 - 質問UIの有無や、質問UIが出ていなかったことを話題にしない
 - 実際の質問情報が渡されたときだけ、その内容に触れてよい
 - answer_signal_score など内部メトリクスの数値は使わないし、話題にしない
@@ -204,9 +214,7 @@ ${JSON.stringify(latestObservation, null, 2)}
 
 recentObservations:
 ${JSON.stringify(recentObservations, null, 2)}
-
-learnerChatHistory:
-${JSON.stringify(learnerChatHistory, null, 2)}
+${learnerChatHistorySection}
 
 existingThoughts:
 ${JSON.stringify(params.existingThoughts, null, 2)}
