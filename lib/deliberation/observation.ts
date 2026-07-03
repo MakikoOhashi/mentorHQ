@@ -144,7 +144,7 @@ function getReasoningMisunderstandingType(reasoningStyle: ReasoningStyle): Obser
   }
 }
 
-function getReasoningIntervention(reasoningStyle: ReasoningStyle) {
+function getReasoningIntervention(reasoningStyle: ReasoningStyle | null) {
   switch (reasoningStyle) {
     case "memory_based":
       return "starting_point_check" as const;
@@ -166,7 +166,7 @@ function detectStatementCorrectness(statement: QuestionStatement, learnerChoice:
 
 function buildStatementObservationNote(
   statementIndex: number,
-  reasoningStyle: ReasoningStyle,
+  reasoningStyle: ReasoningStyle | null,
   reason: string,
   correctness: ObservationCorrectness
 ): string {
@@ -209,7 +209,7 @@ function buildStatementObservationNote(
     : `${correctnessPrefix} 肢${statementIndex}は迷いを残しながら判断しています。`;
 }
 
-function detectStatementSignalScore(reasoningStyle: ReasoningStyle, reason: string): number {
+function detectStatementSignalScore(reasoningStyle: ReasoningStyle | null, reason: string): number {
   const base =
     reasoningStyle === "condition_based"
       ? 0.76
@@ -239,14 +239,8 @@ export function buildStatementObservationInput(params: {
 }): ObservationEventInput {
   const learnerReason = params.learnerReason?.trim() ?? "";
   const correctness = detectStatementCorrectness(params.statement, params.learnerChoice);
-  const reasoningStyle =
-    params.reasoningStyle ??
-    (learnerReason
-      ? detectReasoningStyle(learnerReason)
-      : correctness === "correct"
-        ? "intuition"
-        : "uncertainty");
-  const misunderstandingType = getReasoningMisunderstandingType(reasoningStyle);
+  const reasoningStyle = params.reasoningStyle ?? (learnerReason ? detectReasoningStyle(learnerReason) : null);
+  const misunderstandingType = reasoningStyle ? getReasoningMisunderstandingType(reasoningStyle) : null;
   const observationNote = buildStatementObservationNote(
     params.statementIndex,
     reasoningStyle,

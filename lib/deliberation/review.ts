@@ -24,7 +24,7 @@ function getObservationLabel(value: ObservationEvent["misunderstanding_type"] | 
   }
 }
 
-function isObservationType(value: string): value is ObservationEvent["misunderstanding_type"] {
+function isObservationType(value: string): value is NonNullable<ObservationEvent["misunderstanding_type"]> {
   return (
     value === "starting_point_confusion" ||
     value === "condition_omission" ||
@@ -50,7 +50,11 @@ function getMostRepeatedObservation(
     return memorySummary.mostRepeatedMisunderstanding;
   }
 
-  const counts = observations.reduce<Map<ObservationEvent["misunderstanding_type"], number>>((map, observation) => {
+  const counts = observations.reduce<Map<NonNullable<ObservationEvent["misunderstanding_type"]>, number>>((map, observation) => {
+    if (!observation.misunderstanding_type) {
+      return map;
+    }
+
     map.set(observation.misunderstanding_type, (map.get(observation.misunderstanding_type) ?? 0) + 1);
     return map;
   }, new Map());

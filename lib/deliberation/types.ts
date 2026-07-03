@@ -181,7 +181,7 @@ export type ObservationEvent = {
   learner_reason: string | null;
   reasoning_style: ReasoningStyle | null;
   intervention_type: SelectedIntervention;
-  misunderstanding_type: ObservationMisunderstandingType;
+  misunderstanding_type: ObservationMisunderstandingType | null;
   answer_signal_score: number | null;
   observation_note: string;
   note: string;
@@ -198,7 +198,7 @@ export type ObservationEventInput = {
   learner_reason?: string | null;
   reasoning_style?: ReasoningStyle | null;
   intervention_type: SelectedIntervention;
-  misunderstanding_type: ObservationMisunderstandingType;
+  misunderstanding_type: ObservationMisunderstandingType | null;
   answer_signal_score: number | null;
   observation_note?: string;
   note: string;

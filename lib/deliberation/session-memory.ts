@@ -307,7 +307,7 @@ function toSerializableObservationEvent(snapshot: QueryDocumentSnapshot): Observ
     typeof data.question_id !== "string" ||
     typeof data.question_index !== "number" ||
     !isSelectedIntervention(data.intervention_type) ||
-    !isObservationMisunderstandingType(data.misunderstanding_type) ||
+    !(data.misunderstanding_type === null || isObservationMisunderstandingType(data.misunderstanding_type)) ||
     typeof data.note !== "string"
   ) {
     return null;
@@ -330,7 +330,7 @@ function toSerializableObservationEvent(snapshot: QueryDocumentSnapshot): Observ
         ? data.reasoning_style
         : null,
     intervention_type: data.intervention_type,
-    misunderstanding_type: data.misunderstanding_type,
+    misunderstanding_type: data.misunderstanding_type ?? null,
     answer_signal_score:
       typeof data.answer_signal_score === "number"
         ? data.answer_signal_score
@@ -429,7 +429,7 @@ function isSelectedIntervention(value: unknown): value is ObservationEvent["inte
   );
 }
 
-function isObservationMisunderstandingType(value: unknown): value is ObservationEvent["misunderstanding_type"] {
+function isObservationMisunderstandingType(value: unknown): value is NonNullable<ObservationEvent["misunderstanding_type"]> {
   return (
     value === "starting_point_confusion" ||
     value === "condition_omission" ||
