@@ -117,9 +117,10 @@ function buildSystemInstruction(): string {
     "answer_signal_score は内部観測用の補助スコアです。学習者の自信や不安を表す値ではありません。",
     "answer_signal_score だけを根拠に『自信が低い』『不安そう』『偶然正解した』などと言ってはいけません。",
     "Reading は今回だけ見る。",
-    "Memory は今日の流れと比べる。",
+    "Memory は前回から何が変わったかだけを見る。比較材料がなければ『まだ比較材料は少ない。』で止める。",
     "Pattern は Reading と Memory を受けて、学習者の学び方や理解の進め方を少しだけ更新する。",
-    "Review は結論を出さず、保留だけ置く。",
+    "Pattern は現在の問題や条文や肢を分析しない。学習者モデルだけを話す。",
+    "Review は今日は何を持ち帰るかの候補だけを短く置く。結論は出さない。",
     "出力は JSON のみで、Markdown やコードフェンスは禁止です。"
   ].join("\n");
 }
@@ -170,16 +171,21 @@ ${JSON.stringify(learnerChatHistory, null, 2)}`
 - Memory は recentObservations と Reading の発言を受けて書く
 - Memory は比較できる observation がある場合だけ比較する
 - Memory は実際に渡されたチャット情報がある observation 同士だけでチャット比較をしてよい
+- Memory は「前回と同じ」ではなく、前回から何が変わったかを優先して書く
+- 比較対象が弱いときの Memory は「まだ比較材料は少ない。」だけでよい
 - Pattern は Reading と Memory を受けて、学習者モデルだけを少し更新する
+- Pattern は「この人はどう学ぶタイプか」だけを話す
 - Review は結論を出さず、保留だけ置く
 - Reading は観測できた事実だけを書く
 - Memory は過去 observation との比較だけを書く
 - Pattern は観測根拠があるときだけ、学習者の学び方について最小限の仮説を書く
 - Pattern は問題そのものを分析しない
-- Pattern は「この問題では〜」「この条文では〜」「相続放棄の〜」のように問題内容を説明しない
-- Pattern は学習者を対象にして、「条件を見比べながら理解するタイプかも」「質問しながら理解を進めるタイプかも」程度で止める
+- Pattern は「この問題では〜」「この条文では〜」「相続放棄の〜」「民法915条が〜」のように問題内容を説明しない
+- Pattern は学習者を対象にして、「条件を見比べながら理解するタイプかも」「質問しながら理解を進めるタイプかも」「用語を確認してから納得したいタイプかも」程度で止める
 - Pattern は「〜かも」「まだ分からない」まで。断定しない
+- Pattern は相続、設備、会計、英語に置き換えても成立する内容にする
 - Review は断定しない
+- Review は「今日は何をReview候補に残すか」だけを短く置く
 - Observation に存在しない事実は作らない
 - 観測されていないことは推測しない、話題にしない、補完しない
 - 理由が空でも「直感だった」「迷っていた」「偶然正解した」と言わない
@@ -199,9 +205,9 @@ ${JSON.stringify(learnerChatHistory, null, 2)}`
 
 温度感の例:
 - Reading: 「今回は『知った時』で止まった。」
-- Memory: 「たしかに。前は数字だった。」
-- Pattern: 「それなら質問しながら理解するタイプかも。」
-- Review: 「一旦保留。あと2問見たい。」
+- Memory: 「たしかに。前回は用語、今回は条件を見ている。」
+- Pattern: 「それなら条件を整理しながら考える傾向がありそう。」
+- Review: 「一旦保留。あと数問見たい。」
 
 currentQuestion:
 ${JSON.stringify(params.currentQuestion, null, 2)}
