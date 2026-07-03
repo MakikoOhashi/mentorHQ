@@ -1,153 +1,321 @@
 # MentorHQ
 
-## Overview
+MentorHQ is an observation-centered AI learning architecture.
+The system stores learner-facing facts as `Observation Event`s, saves them to Firestore, and regenerates AI thoughts from those facts whenever needed.
 
-MentorHQ is a coach-centered multi-agent system where specialized AI agents support a single coach’s decisions before the coach responds to the learner.
+## Architecture
 
-MentorHQ は AI Tutor ではなく、Coach Decision OS です。
-学習者を直接支援するのではなく、Coach の判断を支援することを主目的にしています。
-
-## Core Concept
-
-- 学習者に直接話しかける主役は常に Coach
-- Agent は learner-facing ではなく coach-facing
-- Agent は教えるのではなく、観察・分析・推薦を行う
-- Agent は他 Agent の観測を受けて判断を更新する
-- 最後に学習者へ介入するのは Coach
-
-## Deliberation Model
-
-MentorHQ は「Agent が個別に分析するシステム」ではなく、
-「複数 Agent が学習者について解釈を形成し、その上で Coach が意思決定するシステム」として設計する。
-
-```text
-Learner
-  ↓
-Initial Agent Observations
-  ↓
-Agent Deliberation
-  ↓
-Coach Decision
-  ↓
-Intervention
+```mermaid
+graph TD
+A[Learner]
+B[Observation Event]
+C[(Firestore)]
+D[AI Coach Mind]
+E[Daily Review]
+F[Tomorrow Plan]
+A --> B
+B --> C
+C --> D
+C --> E
+E --> F
+C --> F
 ```
 
-## Two-column UI
+### End-to-End Flow
 
-### Left Column
+1. The learner answers each statement.
+2. MentorHQ converts that interaction into an `Observation Event`.
+3. The observation is saved to Firestore as factual history.
+4. AI Coach Mind reads saved observations and regenerates `Reading`, `Memory`, `Pattern`, and `Review`.
+5. Daily Review reads observations plus session memory and generates a daily summary.
+6. Tomorrow Plan reads Daily Review, observations, and session memory and generates the next-day plan.
 
-- Question
-- Learner answer
-- Reflection input
-- Coach response
-- Final integrated question
+### What Is Persistent
 
-### Right Column
+- `observation_events` are the canonical persistent fact layer for learner progress.
+- `daily_reviews` and `tomorrow_plans` are also persisted, but they are generated artifacts.
+- Live Thought Stream is not persisted.
+- AI thoughts are regenerated from saved observations instead of stored as long-lived assets.
 
-- Initial agent observations
-- Agent deliberation stream
-- Confidence
-- Evidence
-- Recommendation
-- Decision trace
+## Observation First Design
 
-## Question Flow
+MentorHQ separates:
 
-MentorHQ does not hardcode one teaching flow.
-It treats question handling as coach-selected `intervention_type`s.
+- `Observation = Fact`
+- `AI Coach Mind = Hypothesis`
 
-For the MVP, leg breakdown is the default `intervention_type` because it makes learner belief visible before explanation.
-The coach can then choose a focused check question or integrated retry based on agent observations and deliberation.
+The system stores learner-side facts such as:
 
-1. Select past exam question
-2. Coach selects an intervention type based on current context
-3. Default MVP `intervention_type` is leg_breakdown
-4. Ask learner to judge each selected leg as true / false / unsure
-5. Ask short reason only when useful
-6. Store learner belief separately from objective truth
-7. Run relevant Agents
-8. Coach selects the next `selected_intervention`
-9. Repeat only if the next observation is useful
-10. Show original integrated multiple-choice question when ready
-11. Ask final answer
-12. Compare local leg-level understanding with final integrated performance
-13. Store outcome
+- answer choice
+- correctness
+- learner question history when it actually exists
+- other observed session facts
 
-## Agent Catalog
+The system does not persist AI thought turns such as:
 
-- Memory Agent
-- Misconception Agent
-- Milestone Agent
-- Health Agent
-- Load Agent
+- `Reading`
+- `Memory`
+- `Pattern`
+- `Review`
 
-各 Agent は答えを返すのではなく、Coach に以下を渡します。
+Those thought layers are regenerated from saved observations each time Gemini is called.
 
-- Finding
-- Risk
-- Recommendation
-- Confidence
-- Evidence
+### Why This Design
 
-## MVP Scope
+- Model improvements should immediately affect newly generated thoughts.
+- Prompt improvements should immediately affect newly generated thoughts.
+- AI output is not treated as the durable asset.
+- Facts remain valuable even if the model changes years later.
 
-### In Scope
+In short:
 
-- 左右 2 カラム UI
-- 過去問 1 問
-- leg_breakdown as default MVP intervention_type
-- intervention_type selection by Coach
-- 短い理由入力
-- Agent Reports
-- Agent Deliberation
-- Coach Decision
-- Final integrated question
-- Decision trace
-- Local JSON memory or simple storage
+- persist facts
+- regenerate thoughts
 
-### Out of Scope
+## AI Design
 
-- 完全な問題 DB
-- ログイン
-- 課金
-- 本格 Firestore
-- OpenMetadata
-- 会社全体の経営シミュレーション
-- Marketing Agent
-- Back Office Agent
-- 汎用資格対応
+### AI Coach Mind
 
-## Hackathon Target
+AI Coach Mind is the runtime layer that reads observation history and generates four short internal turns:
 
-- DevOps x AI Agent Hackathon
-- Google Cloud Run + Gemini API planned
-- 題材は管理業務主任者試験
+- `Reading`: what happened this time
+- `Memory`: what changed from previous observations
+- `Pattern`: what kind of learner this may be
+- `Review`: what to carry forward for review
 
-## Design Docs
+These turns are generated by Gemini through `/api/coach-mind`.
 
-- `docs/00_VISION.md`
-- `docs/01_AGENT_ARCHITECTURE.md`
-- `docs/02_AGENT_CATALOG.md`
-- `docs/03_COACH_DECISION_FLOW.md`
-- `docs/04_QUESTION_FLOW.md`
-- `docs/05_DATA_MODEL.md`
-- `docs/06_MVP_SCOPE.md`
-- `docs/07_IMPLEMENTATION_PLAN.md`
-- `docs/08_TERMINOLOGY.md` - MentorHQ の canonical terminology, naming rules, ambiguous term handling
-- `docs/09_UI_BLUEPRINT.md` - MentorHQ MVP の2カラムUI、state-based UI flow、mock data contract を定義する設計書
-- `docs/10_AGENT_DELIBERATION.md` - Agent Deliberation の定義、責務変更、UI 含意を定義する設計書
+Important constraints in the current implementation:
 
-## Phase 1 Static UI
+- unobserved absence is not treated as evidence
+- missing chat is not described as "no chat happened"
+- missing reason input is not described as "the learner gave no reason"
+- `Pattern` updates learner model only; it should not analyze the current legal topic or statement itself
 
-このリポジトリには、Phase 1 UI を土台にしたローカル版 `Mentor Workspace` を追加しています。
+### Live Thought Stream
 
-- 左: `Learner / Coach Workspace`
-- 右: `Coach Decision Workspace`
-- `POST /api/deliberate` で Agent Deliberation を生成
-- `GEMINI_API_KEY` 未設定時は mock fallback で常に動作
-- DB / 認証なし
+Live Thought Stream is not stored in Firestore.
 
-### Run
+Current runtime behavior:
+
+1. React loads the latest daily session from `/api/daily-session/latest`.
+2. That API reads saved `observation_events` for the session.
+3. React syncs them into `observations` state.
+4. For each observation, the client calls `/api/coach-mind`.
+5. Gemini regenerates `Reading`, `Memory`, `Pattern`, and `Review`.
+
+That means Live Thought Stream is regeneration, not cache.
+
+If the page is reloaded:
+
+- observations can be reloaded from Firestore
+- thought turns are recomputed from those observations
+- previously generated thought text is not restored from DB
+
+## Data Flow
+
+### Learner to Observation
+
+The learner interacts with statement-level questions.
+Each meaningful step is converted into an `Observation Event`, including:
+
+- `question_id`
+- `question_index`
+- `statement_index`
+- `learner_choice`
+- `correct_or_wrong`
+- `observation_note`
+- `note`
+
+When incorrect-answer chat exists, the transcript is stored as factual note content and can later be read by AI Coach Mind.
+
+### Observation to Live Thought Stream
+
+`/api/coach-mind` does not query Firestore directly.
+It receives:
+
+- `latestObservation`
+- `recentObservations`
+- `existingThoughts`
+
+from the client.
+
+Those values come from React state, but that state is hydrated from API responses that themselves read persisted `observation_events`.
+
+### Observation to Daily Review
+
+Daily Review generation reads:
+
+- `observation_events`
+- `sessions`-based memory summary
+
+It then generates a review and stores only the generated review result.
+
+### Observation to Tomorrow Plan
+
+Tomorrow Plan generation reads:
+
+- `daily_reviews`
+- `observation_events`
+- `sessions`-based memory summary
+
+It then generates a plan and stores the generated result.
+
+## Firestore
+
+The current implementation uses these collections:
+
+### `sessions`
+
+Stores deliberation-level session memory.
+
+Main contents:
+
+- `learnerCase`
+- `deliberation_events`
+- `coach_decision`
+- `misunderstanding_type`
+- `mode`
+- `created_at`
+
+This is used for memory context and repeated-pattern summary.
+
+### `daily_sessions`
+
+Stores the learner's daily practice session container.
+
+Main contents:
+
+- `question_ids`
+- `current_index`
+- `observation_count`
+- `status`
+- `review_status`
+- `tomorrow_plan_status`
+- `created_at`
+
+### `observation_events`
+
+Stores factual learner progress events.
+
+Main contents:
+
+- `daily_session_id`
+- `question_id`
+- `question_index`
+- `statement_index`
+- `learner_choice`
+- `correct_or_wrong`
+- `learner_reason`
+- `reasoning_style`
+- `intervention_type`
+- `misunderstanding_type`
+- `answer_signal_score`
+- `observation_note`
+- `note`
+- `created_at`
+
+This is the main fact source for Live Thought Stream, Daily Review, and Tomorrow Plan.
+
+### `daily_reviews`
+
+Stores generated daily review output.
+
+Main contents:
+
+- `daily_session_id`
+- `summary`
+- `key_observations`
+- `repeated_patterns`
+- `coach_comment`
+- `created_at`
+
+### `tomorrow_plans`
+
+Stores generated next-day plan output.
+
+Main contents:
+
+- `daily_session_id`
+- `daily_review_id`
+- `focus_theme`
+- `practice_items`
+- `caution_points`
+- `coach_message`
+- `created_at`
+
+## Storage Model
+
+### Firestore
+
+Primary persistent storage in production-style flow:
+
+- `sessions`
+- `daily_sessions`
+- `observation_events`
+- `daily_reviews`
+- `tomorrow_plans`
+
+### React Local State
+
+Used for current UI/runtime state only.
+
+Examples:
+
+- `observations`
+- `latestObservation`
+- `coachMindTurns`
+- `dailyReview`
+- `tomorrowPlan`
+
+This is not durable storage.
+
+### localStorage
+
+Not used in the current implementation.
+
+### sessionStorage
+
+Not used in the current implementation.
+
+### Fallback Storage
+
+If Firestore is unavailable, the server falls back to:
+
+- in-memory maps
+- JSON files under `/tmp`
+
+Fallback files:
+
+- `mentorhq-daily-sessions.json`
+- `mentorhq-observation-events.json`
+- `mentorhq-daily-reviews.json`
+- `mentorhq-tomorrow-plans.json`
+
+## What Is Recomputed vs Saved
+
+### Saved
+
+- observations
+- daily session metadata
+- deliberation session memory
+- generated daily reviews
+- generated tomorrow plans
+
+### Recomputed
+
+- Live Thought Stream
+- `Reading`
+- `Memory`
+- `Pattern`
+- `Review`
+
+This is the core architecture choice:
+
+- facts are stored
+- thoughts are regenerated
+
+## Run
 
 ```bash
 npm install
@@ -155,6 +323,6 @@ cp .env.example .env.local
 npm run dev
 ```
 
-`GEMINI_API_KEY` を `.env.local` に入れると Gemini API を使います。未設定でも mock fallback で起動できます。
+Open [http://localhost:3000](http://localhost:3000).
 
-その後、[http://localhost:3000](http://localhost:3000) を開いてください。
+If Firestore credentials are unavailable, the app falls back to in-memory and `/tmp` storage.
