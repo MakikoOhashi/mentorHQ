@@ -98,6 +98,8 @@ function buildSystemInstruction(): string {
     "問題解説をしない。学習者への直接指導をしない。Daily Review 本文みたいにしない。",
     "1 agent あたり 1〜2 文。長文禁止。敬語禁止。報告書禁止。",
     "『学習者は〜』『Observationでは〜』『可能性が考えられます』は禁止。",
+    "Observation に存在しない事実は生成しない。absence of evidence を evidence として扱わない。",
+    "観測されていないことは推測しない。話題にしない。補完しない。",
     "answer_signal_score は内部観測用の補助スコアです。学習者の自信や不安を表す値ではありません。",
     "answer_signal_score だけを根拠に『自信が低い』『不安そう』『偶然正解した』などと言ってはいけません。",
     "Reading は今回だけ見る。",
@@ -150,6 +152,10 @@ function buildUserPrompt(params: {
 - Memory は過去 observation との比較だけを書く
 - Pattern は観測根拠があるときだけ最小限の仮説を書く
 - Review は断定しない
+- Observation に存在しない事実は作らない
+- 観測されていないことは推測しない、話題にしない、補完しない
+- 理由が空でも「直感だった」「迷っていた」「偶然正解した」と言わない
+- 質問が無いときも、そこから心理状態を推測しない
 - learner_reason が空でも、理由が無かったと決めつけない
 - 理由入力UIの有無、フォーム状態、ボタン状態など UI 実装の話はしない
 - answer_signal_score など内部メトリクスの数値は使わないし、話題にしない
