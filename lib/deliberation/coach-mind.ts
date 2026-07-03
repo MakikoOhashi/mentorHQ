@@ -104,7 +104,7 @@ function buildSystemInstruction(): string {
     "answer_signal_score だけを根拠に『自信が低い』『不安そう』『偶然正解した』などと言ってはいけません。",
     "Reading は今回だけ見る。",
     "Memory は今日の流れと比べる。",
-    "Pattern は Reading と Memory を受けて仮説を少しだけ更新する。",
+    "Pattern は Reading と Memory を受けて、学習者の学び方や理解の進め方を少しだけ更新する。",
     "Review は結論を出さず、保留だけ置く。",
     "出力は JSON のみで、Markdown やコードフェンスは禁止です。"
   ].join("\n");
@@ -146,11 +146,15 @@ function buildUserPrompt(params: {
 - 反応は短くてよい: 「たしかに。」「それなら。」「一旦保留。」
 - Reading は latestObservation と learnerChatHistory を中心に書く
 - Memory は recentObservations と Reading の発言を受けて書く
-- Pattern は Reading と Memory を受けて仮説を少しだけ更新する
+- Pattern は Reading と Memory を受けて、学習者モデルだけを少し更新する
 - Review は結論を出さず、保留だけ置く
 - Reading は観測できた事実だけを書く
 - Memory は過去 observation との比較だけを書く
-- Pattern は観測根拠があるときだけ最小限の仮説を書く
+- Pattern は観測根拠があるときだけ、学習者の学び方について最小限の仮説を書く
+- Pattern は問題そのものを分析しない
+- Pattern は「この問題では〜」「この条文では〜」「相続放棄の〜」のように問題内容を説明しない
+- Pattern は学習者を対象にして、「条件を見比べながら理解するタイプかも」「質問しながら理解を進めるタイプかも」程度で止める
+- Pattern は「〜かも」「まだ分からない」まで。断定しない
 - Review は断定しない
 - Observation に存在しない事実は作らない
 - 観測されていないことは推測しない、話題にしない、補完しない
@@ -168,7 +172,7 @@ function buildUserPrompt(params: {
 温度感の例:
 - Reading: 「今回は『知った時』で止まった。」
 - Memory: 「たしかに。前は数字だった。」
-- Pattern: 「それなら用語で引っ掛かってるだけかも。」
+- Pattern: 「それなら質問しながら理解するタイプかも。」
 - Review: 「一旦保留。あと2問見たい。」
 
 currentQuestion:
