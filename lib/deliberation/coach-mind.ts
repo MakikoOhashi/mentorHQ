@@ -69,15 +69,17 @@ function buildObservationPromptContext(observation: ObservationEvent): {
   learner_choice: typeof observation.learner_choice;
   correct_or_wrong: typeof observation.correct_or_wrong;
   observation_note: string;
-  learner_chat_messages: Array<{ role: "learner" | "coach"; text: string }>;
+  learner_chat_messages?: Array<{ role: "learner" | "coach"; text: string }>;
 } {
+  const learnerChatMessages = parseLearnerChatHistory(observation.note);
+
   return {
     question_id: observation.question_id,
     statement_index: observation.statement_index,
     learner_choice: observation.learner_choice,
     correct_or_wrong: observation.correct_or_wrong,
     observation_note: observation.observation_note,
-    learner_chat_messages: parseLearnerChatHistory(observation.note)
+    ...(learnerChatMessages.length > 0 ? { learner_chat_messages: learnerChatMessages } : {})
   };
 }
 
@@ -110,6 +112,8 @@ function buildSystemInstruction(): string {
     "したがって、理由が入力されていないことに言及してはいけません。",
     "理由がないことを根拠に推測してはいけません。",
     "観測できるのは、選択結果と、その後に学習者が任意で質問した内容だけです。",
+    "質問情報が渡されていない場合、それは『質問がなかった』ことを意味しません。単に観測対象外です。",
+    "質問情報が実際に渡されている場合だけ、用語を質問している、条文を聞いている、などと言ってよいです。",
     "answer_signal_score は内部観測用の補助スコアです。学習者の自信や不安を表す値ではありません。",
     "answer_signal_score だけを根拠に『自信が低い』『不安そう』『偶然正解した』などと言ってはいけません。",
     "Reading は今回だけ見る。",
@@ -136,6 +140,7 @@ function buildUserPrompt(params: {
   const latestObservation = buildObservationPromptContext(params.latestObservation);
   const recentObservations = params.recentObservations.map((observation) => buildObservationPromptContext(observation));
   const currentStatement = buildStatementPromptContext(params.currentStatement);
+  const learnerChatHistory = params.learnerChatHistory.length > 0 ? params.learnerChatHistory : undefined;
 
   return `次の情報をもとに、agent chain を 4 turns で生成してください。
 
@@ -172,9 +177,11 @@ function buildUserPrompt(params: {
 - 理由が空でも「直感だった」「迷っていた」「偶然正解した」と言わない
 - 理由が入力されていないこと自体を話題にしない
 - 理由入力UI、reason フィールド、フォーム状態の話はしない
-- 質問が無いときも、そこから心理状態を推測しない
+- 質問情報が渡されていないときに「質問はなかった」と言わない
+- 質問UIの有無や、質問UIが出ていなかったことを話題にしない
+- 実際の質問情報が渡されたときだけ、その内容に触れてよい
 - answer_signal_score など内部メトリクスの数値は使わないし、話題にしない
-- その場合は、選択結果・正誤・質問有無・今日までの observation だけから読む
+- その場合は、選択結果・正誤・実際に渡された質問情報・今日までの observation だけから読む
 - currentQuestion と currentStatement は文脈として使ってよいが、問題解説はしない
 - existingThoughts と同じ表現の繰り返しは避ける
 - 敬語禁止。報告書禁止
@@ -199,7 +206,7 @@ recentObservations:
 ${JSON.stringify(recentObservations, null, 2)}
 
 learnerChatHistory:
-${JSON.stringify(params.learnerChatHistory, null, 2)}
+${JSON.stringify(learnerChatHistory, null, 2)}
 
 existingThoughts:
 ${JSON.stringify(params.existingThoughts, null, 2)}
