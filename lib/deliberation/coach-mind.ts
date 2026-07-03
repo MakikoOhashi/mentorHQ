@@ -68,22 +68,28 @@ function buildObservationPromptContext(observation: ObservationEvent): {
   statement_index: number | null;
   learner_choice: typeof observation.learner_choice;
   correct_or_wrong: typeof observation.correct_or_wrong;
-  learner_reason: string | null;
-  reasoning_style: typeof observation.reasoning_style;
-  misunderstanding_type: typeof observation.misunderstanding_type;
   observation_note: string;
-  learner_note: string;
+  learner_chat_messages: Array<{ role: "learner" | "coach"; text: string }>;
 } {
   return {
     question_id: observation.question_id,
     statement_index: observation.statement_index,
     learner_choice: observation.learner_choice,
     correct_or_wrong: observation.correct_or_wrong,
-    learner_reason: observation.learner_reason,
-    reasoning_style: observation.reasoning_style,
-    misunderstanding_type: observation.misunderstanding_type,
     observation_note: observation.observation_note,
-    learner_note: observation.note
+    learner_chat_messages: parseLearnerChatHistory(observation.note)
+  };
+}
+
+function buildStatementPromptContext(statement: QuestionStatement | null) {
+  if (!statement) {
+    return null;
+  }
+
+  return {
+    statement_text: statement.text,
+    correct_label: statement.isCorrect ? "correct" : "incorrect",
+    statement_explanation: statement.explanation
   };
 }
 
@@ -100,6 +106,10 @@ function buildSystemInstruction(): string {
     "『学習者は〜』『Observationでは〜』『可能性が考えられます』は禁止。",
     "Observation に存在しない事実は生成しない。absence of evidence を evidence として扱わない。",
     "観測されていないことは推測しない。話題にしない。補完しない。",
+    "この設計では、学習者に理由入力を求めていません。",
+    "したがって、理由が入力されていないことに言及してはいけません。",
+    "理由がないことを根拠に推測してはいけません。",
+    "観測できるのは、選択結果と、その後に学習者が任意で質問した内容だけです。",
     "answer_signal_score は内部観測用の補助スコアです。学習者の自信や不安を表す値ではありません。",
     "answer_signal_score だけを根拠に『自信が低い』『不安そう』『偶然正解した』などと言ってはいけません。",
     "Reading は今回だけ見る。",
@@ -125,6 +135,7 @@ function buildUserPrompt(params: {
 }): string {
   const latestObservation = buildObservationPromptContext(params.latestObservation);
   const recentObservations = params.recentObservations.map((observation) => buildObservationPromptContext(observation));
+  const currentStatement = buildStatementPromptContext(params.currentStatement);
 
   return `次の情報をもとに、agent chain を 4 turns で生成してください。
 
@@ -159,9 +170,9 @@ function buildUserPrompt(params: {
 - Observation に存在しない事実は作らない
 - 観測されていないことは推測しない、話題にしない、補完しない
 - 理由が空でも「直感だった」「迷っていた」「偶然正解した」と言わない
+- 理由が入力されていないこと自体を話題にしない
+- 理由入力UI、reason フィールド、フォーム状態の話はしない
 - 質問が無いときも、そこから心理状態を推測しない
-- learner_reason が空でも、理由が無かったと決めつけない
-- 理由入力UIの有無、フォーム状態、ボタン状態など UI 実装の話はしない
 - answer_signal_score など内部メトリクスの数値は使わないし、話題にしない
 - その場合は、選択結果・正誤・質問有無・今日までの observation だけから読む
 - currentQuestion と currentStatement は文脈として使ってよいが、問題解説はしない
@@ -179,7 +190,7 @@ currentQuestion:
 ${JSON.stringify(params.currentQuestion, null, 2)}
 
 currentStatement:
-${JSON.stringify(params.currentStatement, null, 2)}
+${JSON.stringify(currentStatement, null, 2)}
 
 latestObservation:
 ${JSON.stringify(latestObservation, null, 2)}

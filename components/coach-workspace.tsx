@@ -636,7 +636,6 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
         statementIndex: currentStatementIndex + 1,
         statement: statementForChat,
         learnerChoice: statementChoice,
-        learnerReason: learnerMessage,
         learnerNote: buildTranscriptNote(existingMessages, learnerMessage, replyText)
       });
 
