@@ -1415,6 +1415,47 @@ blockquote {
   background: linear-gradient(180deg, #fff9ed, #ffffff);
 }
 
+.feedback-statement-context {
+  margin-bottom: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid #dbe2ec;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.feedback-statement-text {
+  margin-top: 8px;
+  color: var(--text);
+  line-height: 1.55;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.feedback-context-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.feedback-chip {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid #d8ddf6;
+  background: #f7f8ff;
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.35;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
 .statement-card,
 .final-choice-card {
   margin-bottom: 16px;

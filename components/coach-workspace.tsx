@@ -87,6 +87,22 @@ const STATEMENT_OPTIONS: Array<{ label: string; value: StatementChoice }> = [
   { label: "× 誤り", value: "incorrect" }
 ];
 
+function getStatementChoiceLabel(choice: StatementChoice | null): string {
+  if (choice === "correct") {
+    return "○ 正しい";
+  }
+
+  if (choice === "incorrect") {
+    return "× 誤り";
+  }
+
+  return "未回答";
+}
+
+function getCorrectnessLabel(isCorrect: boolean): string {
+  return isCorrect ? "○ 正しい" : "× 誤り";
+}
+
 function getCurrentStep(session: DailySession | null, tomorrowPlan: TomorrowPlan | null): LearnerStep {
   if (!session) {
     return "morning";
@@ -821,6 +837,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     : 0;
   const isQuestionStep = currentStep.startsWith("question-");
   const currentStatement = learnerCase.statements[currentStatementIndex] ?? null;
+  const answeredChoiceLabel = getStatementChoiceLabel(statementChoice);
+  const correctChoiceLabel = currentStatement ? getCorrectnessLabel(currentStatement.isCorrect) : "";
   const nextResultLabel =
     queuedNextPayload?.session.status === "completed" ? "今日のふりかえりへ" : "次の問題へ";
 
@@ -1000,6 +1018,16 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                     ) : submittedStatementResult ? (
                       submittedStatementResult.mode === "correct" ? (
                         <section className="feedback-card feedback-card--good">
+                          {currentStatement ? (
+                            <div className="feedback-statement-context">
+                              <span className="summary-label">肢{currentStatementIndex + 1}</span>
+                              <p className="feedback-statement-text">{currentStatement.text}</p>
+                              <div className="feedback-context-chips">
+                                <span className="feedback-chip">あなたの回答: {answeredChoiceLabel}</span>
+                                <span className="feedback-chip">正しい判定: {correctChoiceLabel}</span>
+                              </div>
+                            </div>
+                          ) : null}
                           <p>✓ 正解</p>
                           <p>ポイント</p>
                           <p className="feedback-point-text">{submittedStatementResult.point}</p>
@@ -1011,6 +1039,16 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                         </section>
                       ) : (
                         <section className="feedback-card feedback-card--caution">
+                          {currentStatement ? (
+                            <div className="feedback-statement-context">
+                              <span className="summary-label">肢{currentStatementIndex + 1}</span>
+                              <p className="feedback-statement-text">{currentStatement.text}</p>
+                              <div className="feedback-context-chips">
+                                <span className="feedback-chip">あなたの回答: {answeredChoiceLabel}</span>
+                                <span className="feedback-chip">正しい判定: {correctChoiceLabel}</span>
+                              </div>
+                            </div>
+                          ) : null}
                           <p>❌</p>
                           <p>今回はここだけ違いました。</p>
                           <p>ポイント</p>
