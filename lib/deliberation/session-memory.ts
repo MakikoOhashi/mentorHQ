@@ -1308,11 +1308,17 @@ export async function generateTomorrowPlanForSession({
   }
 
   const memorySummary = await getLatestMemorySummary();
-  const planInput = buildTomorrowPlanInput({
+  const planInput = await buildTomorrowPlanInput({
     dailySessionId: sessionId,
     dailyReview: review,
     observations,
-    memorySummary
+    memorySummary,
+    dailySession: {
+      question_ids: session.question_ids,
+      observation_count: observations.length,
+      status: session.status,
+      review_status: session.review_status
+    }
   });
   const plan = await createTomorrowPlan(planInput);
   if (!plan) {
