@@ -1165,12 +1165,16 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                         <div className="reflection-box">{dailyReview.summary}</div>
                       </section>
                       <section className="daily-review-block">
-                        <span className="summary-label">Key Observations</span>
+                        <span className="summary-label">Key Insights</span>
                         <div className="review-list">
                           {dailyReview.key_observations.map((item) => (
                             <p key={item}>{item}</p>
                           ))}
                         </div>
+                      </section>
+                      <section className="daily-review-block">
+                        <span className="summary-label">Learner Pattern</span>
+                        <div className="reflection-box">{dailyReview.coach_comment}</div>
                       </section>
                       <section className="daily-review-block">
                         <span className="summary-label">Tomorrow Candidates</span>
