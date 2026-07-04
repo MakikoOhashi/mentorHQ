@@ -1258,10 +1258,15 @@ export async function generateDailyReviewForSession({
   }
 
   const memorySummary = await getLatestMemorySummary();
-  const reviewInput = buildDailyReviewInput({
+  const reviewInput = await buildDailyReviewInput({
     dailySessionId: sessionId,
     observations,
-    memorySummary
+    memorySummary,
+    dailySession: {
+      question_ids: session.question_ids,
+      observation_count: observations.length,
+      status: session.status
+    }
   });
   const review = await createDailyReview(reviewInput);
   if (!review) {
