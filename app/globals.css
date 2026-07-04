@@ -878,6 +878,7 @@ blockquote {
 }
 
 .secondary-button {
+  border: 0;
   background: #2b8a67;
   color: #f7fffb;
   box-shadow: 0 10px 24px rgba(31, 119, 87, 0.22);
