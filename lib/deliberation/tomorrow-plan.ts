@@ -19,6 +19,10 @@ type TomorrowPlanOutput = Pick<
   "focus_theme" | "practice_items" | "caution_points" | "coach_message"
 >;
 
+const FOCUS_THEME_MAX_LENGTH = 20;
+const PRACTICE_ITEM_MAX_LENGTH = 40;
+const CAUTION_POINT_MAX_LENGTH = 30;
+
 function truncateForLog(value: string, maxLength = 1000): string {
   return value.length > maxLength ? `${value.slice(0, maxLength)}…[truncated]` : value;
 }
@@ -231,7 +235,16 @@ function sanitizePlan(raw: unknown): TomorrowPlanOutput | null {
     ? candidate.caution_points.filter((item): item is string => typeof item === "string").map((item) => sanitizeText(item)).filter(Boolean)
     : [];
 
-  if (!focusTheme || !coachMessage || practiceItems.length !== 3 || cautionPoints.length === 0 || cautionPoints.length > 2) {
+  if (
+    !focusTheme ||
+    !coachMessage ||
+    focusTheme.length > FOCUS_THEME_MAX_LENGTH ||
+    practiceItems.length !== 3 ||
+    practiceItems.some((item) => item.length > PRACTICE_ITEM_MAX_LENGTH) ||
+    cautionPoints.length === 0 ||
+    cautionPoints.length > 2 ||
+    cautionPoints.some((item) => item.length > CAUTION_POINT_MAX_LENGTH)
+  ) {
     return null;
   }
 
@@ -246,13 +259,23 @@ function sanitizePlan(raw: unknown): TomorrowPlanOutput | null {
 function buildSystemInstruction(): string {
   return [
     "あなたは MentorHQ の Tomorrow Plan Generator です。",
-    "目的は、Daily Review と Observation と Session Memory をもとに、明日すぐ実行できる学習計画を返すことです。",
+    "目的は、Daily Review と Observation と Session Memory をもとに、明日学習を始める前に5〜10秒で読める短い行動メモを返すことです。",
+    "Tomorrow Plan は Daily Review の要約ではない。明日何をするかだけを書く。",
     "Observation をそのまま列挙しない。Daily Review を言い換えるだけにしない。",
     "Focus Theme は 1 つだけ返す。",
     "Practice Items は必ず 3 件返す。",
     "Caution Points は 1〜2 件返す。",
+    `Focus Theme は ${FOCUS_THEME_MAX_LENGTH}文字以内の短いフレーズにする。`,
+    `Practice Items は各${PRACTICE_ITEM_MAX_LENGTH}文字以内にする。`,
+    `Caution Points は各${CAUTION_POINT_MAX_LENGTH}文字以内にする。`,
     "各項目は短く、学習者が明日そのまま行動できる粒度にする。",
+    "Practice Items は説明文にしない。実際の行動だけを書く。",
+    "『〜する練習をする』『〜する際には』のような説明調は禁止。",
+    "Caution Points は短い注意だけを書く。",
+    "文体は命令ではなく、自分用の付箋メモのようにする。",
+    "『〜しましょう』ではなく『〜する』『〜見る』『〜確認する』程度で書く。",
     "抽象語だけで終わらない。『何をするか』が分かる表現にする。",
+    "スマホ1画面で一目で読める長さを優先する。",
     "Observation にない内容を断定しない。",
     "過去傾向があれば memorySummary を少しだけ反映してよい。",
     "出力は JSON のみ。Markdown やコードフェンスは禁止。"
@@ -276,6 +299,9 @@ function buildPrompt(params: {
 
   return `次の情報をもとに、Tomorrow Plan を生成してください。
 
+Tomorrow Plan は「明日、学習を始める前に5〜10秒で見るメモ」です。
+Review の要約ではなく、明日そのままやる行動だけを書いてください。
+
 出力 shape:
 {
   "focus_theme": "...",
@@ -286,16 +312,37 @@ function buildPrompt(params: {
 
 ルール:
 - focus_theme は 1 つ
+- focus_theme は ${FOCUS_THEME_MAX_LENGTH}文字以内
 - practice_items は 3 件ちょうど
+- practice_items は各${PRACTICE_ITEM_MAX_LENGTH}文字以内
 - caution_points は 2 件まで
-- 各項目は短く
+- caution_points は各${CAUTION_POINT_MAX_LENGTH}文字以内
+- 各項目は短く、スマホで一目で読める長さにする
 - 学習者が明日そのまま実行できる内容にする
+- Action First。説明より先に行動を書く
 - Observation をそのまま列挙しない
-- Daily Review の内容を踏まえる
+- Daily Review の言い換えにしない
+- Daily Review の内容を踏まえて、明日の行動に変換する
 - memorySummary があれば過去傾向を少し反映する
 - 「何をするか」が分かる表現にする
 - 抽象語だけで終わらない
-- Coach Message は明日の取り組み方を短く示す
+- Practice Items は説明文にしない
+- 「〜する練習をする」「〜する際には」のような書き方は禁止
+- 例: 「いつから」を先に探す
+- 例: 熟慮期間の起算点を復習する
+- 例: 判断前に基準語を確認する
+- 例: 決議要件だけ解き直す
+- 悪い例: 問題文を読む際、まず「いつから」「何を基準に」を特定する練習をする。
+- 悪い例: 新しい問題に挑戦する際、結論を出す前に必ず起点を声に出して確認する。
+- Caution Points は短い注意だけにする
+- 例: 数字だけで判断しない
+- 例: 起点を飛ばさない
+- 例: 条件を読み飛ばさない
+- 例: 迷った理由を確認する
+- 悪い例: 最終的に正解できても、起算点や判断基準に迷った場合は、その過程を必ず振り返る。
+- 悪い例: 「分かったつもり」にならず、問題文の指示を正確に読み取り、焦らず起点を設定する。
+- 文体は「〜する」「〜見る」「〜確認する」程度にする
+- Coach Message は短く、明日の姿勢を一言で示す
 
 daily_session:
 ${JSON.stringify(params.dailySession, null, 2)}
