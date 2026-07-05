@@ -1597,6 +1597,10 @@ blockquote {
   text-align: center;
 }
 
+.primary-button.phone-button {
+  margin-top: 14px;
+}
+
 .coaching-chat-list {
   display: grid;
   gap: 10px;
