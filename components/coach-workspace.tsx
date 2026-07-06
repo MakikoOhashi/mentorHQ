@@ -59,6 +59,8 @@ type ReviewConsensusTurn = {
   text: string;
 };
 
+type ConsensusMode = "review" | "tomorrow";
+
 type FinalResult = {
   selectedIndex: number;
   correctIndex: number;
@@ -224,6 +226,36 @@ function buildReviewConsensusTurns(): ReviewConsensusTurn[] {
   ];
 }
 
+function buildTomorrowConsensusTurns(): ReviewConsensusTurn[] {
+  return [
+    {
+      id: "tomorrow-reading",
+      speakerLabel: "Reading",
+      text: "今日の Review をもとに、明日の重点を整理します。"
+    },
+    {
+      id: "tomorrow-memory",
+      speakerLabel: "Memory",
+      text: "Observation と今日の Review を確認します。"
+    },
+    {
+      id: "tomorrow-pattern",
+      speakerLabel: "Pattern",
+      text: "明日の練習テーマを絞ります。"
+    },
+    {
+      id: "tomorrow-review",
+      speakerLabel: "Review",
+      text: "Tomorrow Plan をまとめます。"
+    },
+    {
+      id: "tomorrow-consensus",
+      speakerLabel: "Consensus",
+      text: "Tomorrow Plan を学習者へ送ります。"
+    }
+  ];
+}
+
 
 export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const [learnerCase, setLearnerCase] = useState(initialCase);
@@ -253,6 +285,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const [reviewConsensusTurns, setReviewConsensusTurns] = useState<ReviewConsensusTurn[]>([]);
   const [visibleReviewConsensusIds, setVisibleReviewConsensusIds] = useState<string[]>([]);
   const [reviewConsensusStatus, setReviewConsensusStatus] = useState<"idle" | "running" | "complete">("idle");
+  const [consensusMode, setConsensusMode] = useState<ConsensusMode | null>(null);
   const revealTimeoutIdsRef = useRef<number[]>([]);
   const reviewConsensusTimeoutIdsRef = useRef<number[]>([]);
   const generatedThoughtObservationIdsRef = useRef<Set<string>>(new Set());
@@ -297,6 +330,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     setReviewConsensusTurns([]);
     setVisibleReviewConsensusIds([]);
     setReviewConsensusStatus("idle");
+    setConsensusMode(null);
     generatedThoughtObservationIdsRef.current = new Set();
     generatingThoughtObservationIdsRef.current = new Set();
     coachMindTurnsRef.current = [];
@@ -387,6 +421,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       setReviewConsensusTurns([]);
       setVisibleReviewConsensusIds([]);
       setReviewConsensusStatus("idle");
+      setConsensusMode(null);
       generatedThoughtObservationIdsRef.current = new Set();
       generatingThoughtObservationIdsRef.current = new Set();
       coachMindTurnsRef.current = [];
@@ -848,15 +883,18 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       return;
     }
 
+    const consensusTurns = buildReviewConsensusTurns();
+
     setReviewActionStatus("generating");
     setReviewConsensusStatus("running");
-    setReviewConsensusTurns(buildReviewConsensusTurns());
+    setConsensusMode("review");
+    setReviewConsensusTurns(consensusTurns);
     setVisibleReviewConsensusIds([]);
     setErrorMessage(null);
 
     try {
       const revealDuration =
-        (buildReviewConsensusTurns().length - 1) * REVIEW_CONSENSUS_REVEAL_DELAY_MS + REVIEW_CONSENSUS_SETTLE_DELAY_MS;
+        (consensusTurns.length - 1) * REVIEW_CONSENSUS_REVEAL_DELAY_MS + REVIEW_CONSENSUS_SETTLE_DELAY_MS;
       const response = await fetch("/api/daily-session/review", {
         method: "POST",
         headers: {
@@ -885,6 +923,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       setReviewConsensusTurns([]);
       setVisibleReviewConsensusIds([]);
       setReviewConsensusStatus("idle");
+      setConsensusMode(null);
       setErrorMessage(error instanceof Error ? error.message : "Unknown error");
     } finally {
       setReviewActionStatus("idle");
@@ -897,10 +936,18 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       return;
     }
 
+    const consensusTurns = buildTomorrowConsensusTurns();
+
     setPlanActionStatus("generating");
+    setReviewConsensusStatus("running");
+    setConsensusMode("tomorrow");
+    setReviewConsensusTurns(consensusTurns);
+    setVisibleReviewConsensusIds([]);
     setErrorMessage(null);
 
     try {
+      const revealDuration =
+        (consensusTurns.length - 1) * REVIEW_CONSENSUS_REVEAL_DELAY_MS + REVIEW_CONSENSUS_SETTLE_DELAY_MS;
       const response = await fetch("/api/daily-session/tomorrow-plan", {
         method: "POST",
         headers: {
@@ -917,9 +964,19 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       }
 
       const payload = (await response.json()) as DailySessionPayload;
-      applyDailySessionPayload(payload);
+      applyDailySessionPayload({
+        ...payload,
+        tomorrowPlan: null
+      });
       setLearnerStepOverride("tomorrow");
+      await new Promise((resolve) => window.setTimeout(resolve, revealDuration));
+      setTomorrowPlan(payload.tomorrowPlan);
+      setReviewConsensusStatus("complete");
     } catch (error) {
+      setReviewConsensusTurns([]);
+      setVisibleReviewConsensusIds([]);
+      setReviewConsensusStatus("idle");
+      setConsensusMode(null);
       setErrorMessage(error instanceof Error ? error.message : "Unknown error");
     } finally {
       setPlanActionStatus("idle");
@@ -928,7 +985,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
 
   const derivedStep = getCurrentStep(dailySession, tomorrowPlan);
   const currentStep = learnerStepOverride ?? derivedStep;
-  const isReviewConsensusActive = currentStep === "review" && reviewConsensusStatus !== "idle";
+  const isReviewConsensusActive =
+    (currentStep === "review" || currentStep === "tomorrow") && reviewConsensusStatus !== "idle";
   const currentStepIndex = STEP_ORDER.indexOf(currentStep);
   const activeQuestionNumber =
     dailySession && dailySession.status !== "completed" ? dailySession.current_index + 1 : null;
@@ -1426,7 +1484,9 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                 <h3>Live Thought Stream</h3>
                 <p className="device-caption">
                   {isReviewConsensusActive
-                    ? "Observation を受けて AI Coach Team が総意をまとめています。"
+                    ? consensusMode === "tomorrow"
+                      ? "Daily Review を入力に、AI Coach Team が Tomorrow Plan の総意をまとめています。"
+                      : "Observation を受けて AI Coach Team が総意をまとめています。"
                     : "仮説が少しずつ更新されるライブ会話です。"}
                 </p>
               </div>
@@ -1444,7 +1504,11 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                   visibleReviewConsensusTurns.length === 0 ? (
                     <div className="observation-empty-state">
                       <p>Coach Team Deliberation...</p>
-                      <p>Observation をもとに総括をまとめています。</p>
+                      <p>
+                        {consensusMode === "tomorrow"
+                          ? "Daily Review をもとに Tomorrow Plan を組み立てています。"
+                          : "Observation をもとに総括をまとめています。"}
+                      </p>
                     </div>
                   ) : (
                     visibleReviewConsensusTurns.map((turn, index) => (
