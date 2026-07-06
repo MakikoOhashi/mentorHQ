@@ -92,49 +92,40 @@ function getMostRepeatedObservation(
   return Array.from(counts.entries()).sort((left, right) => right[1] - left[1])[0]?.[0] ?? "unknown";
 }
 
-function collectUniqueExplanationInsights(observations: ObservationEvent[]): string[] {
-  const insights: string[] = [];
-  const seen = new Set<string>();
+function pushUniqueInsight(insights: string[], seen: Set<string>, value: string): void {
+  const normalized = sanitizeText(value);
 
-  observations.forEach((observation) => {
-    if (!observation.question_id || !observation.statement_index) {
-      return;
-    }
+  if (!normalized || seen.has(normalized)) {
+    return;
+  }
 
-    const learnerCase = getLearnerCaseByQuestionId(observation.question_id);
-    const statement = learnerCase?.statements[observation.statement_index - 1];
-    const explanation = statement?.explanation?.trim();
-
-    if (!explanation || seen.has(explanation)) {
-      return;
-    }
-
-    seen.add(explanation);
-    insights.push(explanation);
-  });
-
-  return insights;
+  seen.add(normalized);
+  insights.push(normalized);
 }
 
 function buildSummary(
   observations: ObservationEvent[],
   repeatedObservation: ObservationEvent["misunderstanding_type"] | "unknown"
 ): string {
-  const totalStatements = observations.length;
   const correctCount = observations.filter((observation) => observation.correct_or_wrong === "correct").length;
   const wrongCount = observations.filter((observation) => observation.correct_or_wrong === "wrong").length;
   const chatCount = observations.filter((observation) => /Learner: /i.test(observation.note)).length;
   const repeatedLabel = getObservationLabel(repeatedObservation);
+  const stableCount = observations.filter((observation) => observation.misunderstanding_type === "stable_progress").length;
 
-  if (correctCount > 0 && correctCount >= wrongCount) {
-    return `今日は ${totalStatements} 件の Observation から、後半に向けて正しく判断できる場面が増え、理解が整理されてきた様子が見えます。特に「${repeatedLabel}」が今日の学びの軸になっていました。`;
+  if (stableCount > 0 && correctCount >= wrongCount) {
+    return `今日は、確認しながら判断できる場面が増え、学習の流れを自分で整えられていました。一方で「${repeatedLabel}」に関わる場面では少し迷いが残り、そこが今日の振り返りのポイントです。`;
   }
 
   if (chatCount > 0) {
-    return `今日は ${totalStatements} 件の Observation を通じて、質問しながら理解を深める場面が見られました。特に「${repeatedLabel}」に関わる箇所で、考え方を整えようとしていた様子があります。`;
+    return `今日は、やり取りを重ねながら考え方を少しずつ整理できた一日でした。特に「${repeatedLabel}」に関わる場面で立ち止まりつつも、質問を使って理解を前に進められています。`;
   }
 
-  return `今日は ${totalStatements} 件の Observation から、判断の進め方にいくつかの癖が見えました。特に「${repeatedLabel}」が繰り返し現れており、ここを整理すると学習全体が進みやすくなりそうです。`;
+  if (correctCount > 0 && correctCount >= wrongCount) {
+    return `今日は、できている判断を保ちながら進められた場面がありました。その一方で「${repeatedLabel}」に引っかかる場面もあり、判断の軸をそろえることが今日のテーマになっています。`;
+  }
+
+  return `今日は、答えを出すまでの考え方を整えることが中心になった一日でした。特に「${repeatedLabel}」が繰り返し出ており、ここを整理すると明日はもっと進めやすくなりそうです。`;
 }
 
 function buildKeyInsights(observations: ObservationEvent[]): string[] {
@@ -142,28 +133,46 @@ function buildKeyInsights(observations: ObservationEvent[]): string[] {
   const wrongCount = observations.filter((observation) => observation.correct_or_wrong === "wrong").length;
   const conditionCount = observations.filter((observation) => observation.reasoning_style === "condition_based").length;
   const memoryCount = observations.filter((observation) => observation.reasoning_style === "memory_based").length;
-  const explanations = collectUniqueExplanationInsights(observations);
+  const intuitionCount = observations.filter((observation) => observation.reasoning_style === "intuition").length;
+  const uncertaintyCount = observations.filter((observation) => observation.reasoning_style === "uncertainty").length;
+  const stableCount = observations.filter((observation) => observation.misunderstanding_type === "stable_progress").length;
+  const repeatedObservation = getMostRepeatedObservation(observations, null);
+  const repeatedLabel = getObservationLabel(repeatedObservation);
+  const chatCount = observations.filter((observation) => /Learner: /i.test(observation.note)).length;
   const insights: string[] = [];
+  const seen = new Set<string>();
 
-  explanations.slice(0, 3).forEach((explanation) => {
-    insights.push(explanation);
-  });
+  if (stableCount > 0 || (correctCount > 0 && correctCount >= wrongCount)) {
+    pushUniqueInsight(insights, seen, "できている問題では、確認しながら判断を安定して続けられていました。");
+  }
+
+  if (chatCount > 0) {
+    pushUniqueInsight(insights, seen, "迷った場面でも、やり取りを通して考え方を整理し直せていました。");
+  }
+
+  if (repeatedObservation !== "unknown") {
+    pushUniqueInsight(insights, seen, `今日は「${repeatedLabel}」が繰り返し出ており、ここが学習の引っかかりになっていました。`);
+  }
 
   if (conditionCount > 0) {
-    insights.push("条件や要件を見ながら判断できる場面がありました。");
+    pushUniqueInsight(insights, seen, "条件や判断基準を拾える場面では、答えまでの流れが比較的安定していました。");
   }
 
   if (memoryCount > 0) {
-    insights.push("数字や既に覚えている知識を手がかりに進める場面が見られました。");
+    pushUniqueInsight(insights, seen, "覚えている知識から先に入る場面があり、条件確認までつなげるとさらに判断しやすくなりそうです。");
+  }
+
+  if (intuitionCount > 0 || uncertaintyCount > 0 || wrongCount > 0) {
+    pushUniqueInsight(insights, seen, "迷いが出た場面では、答えを急がずに根拠を一言置くと判断がぶれにくくなりそうです。");
   }
 
   if (correctCount > 0 && correctCount >= wrongCount) {
-    insights.push("後半では正答が続き、判断の再現性が少しずつ安定してきました。");
+    pushUniqueInsight(insights, seen, "後半にかけては、できている考え方をそのまま再現できる場面が増えていました。");
   } else if (wrongCount > 0) {
-    insights.push("迷いやすい箇所が残っており、判断軸をそろえる余地がありそうです。");
+    pushUniqueInsight(insights, seen, "今日は結論よりも、判断の起点をそろえることが大事な一日でした。");
   }
 
-  return Array.from(new Set(insights)).slice(0, 5);
+  return insights.slice(0, 5);
 }
 
 function buildLearnerPattern(
@@ -281,13 +290,17 @@ function buildSystemInstruction(): string {
     "目的は、保存済み observation_events と session memory をもとに、学習者向けの短い Daily Review を返すことです。",
     "Daily Review は AI Coach Team 全体の consensus である。",
     "Review agent 個人の意見として書かない。",
+    "Daily Review は学習内容の要約ではなく、学習者の一日の振り返りである。",
     "Daily Review は Observation Log ではなく Learning Insight である。",
     "Observation を羅列しない。肢1/肢2の一覧にしない。会話全文を出さない。",
-    "今日できるようになったこと、今日つまずいた観点、学習者の傾向、明日につながる観点を書く。",
+    "法律知識のまとめや条文説明を書かない。知識項目の列挙をしない。",
+    "今日できるようになったこと、今日少し迷ったこと、学習者の傾向、明日につながる観点を書く。",
     "学習者向けに自然な日本語で、スマホで読める分量にする。",
+    "summary は 2〜3 文で、今日のストーリーを書く。知識要約にしない。",
     "key_observations は 3〜5 件に絞る。",
+    "key_observations は Observation の写しではなく、Observation から分かる Learning Insight に変換する。",
     "repeated_patterns は明日につながる観点として短く返す。",
-    "問題情報や explanation は、学びが整理されたポイントを要約するために使ってよい。",
+    "問題情報や explanation は文脈理解のためだけに使い、説明の要約をそのまま出力しない。",
     "誤答後チャットがある場合は、理解が動いたポイントだけを要約して反映する。",
     "Observation にない内容を断定しない。",
     "出力は JSON のみ。Markdown やコードフェンスは禁止。"
@@ -358,8 +371,9 @@ function buildPrompt(params: {
   return `次の情報をもとに、Daily Review を生成してください。
 
 Daily Review は Observation Log ではなく Learning Insight です。
-今日の観察を並べるのではなく、学習者が今日どう学べたかを短く整理してください。
+今日の観察を並べるのではなく、学習者に今日何が起きたかを短く整理してください。
 AI Coach Team 全体の consensus として返してください。
+法律知識のまとめにはしないでください。
 
 出力 shape:
 {
@@ -370,7 +384,7 @@ AI Coach Team 全体の consensus として返してください。
 }
 
 ルール:
-- summary は短い段落 1 つ
+- summary は 2〜3 文の短い段落 1 つ
 - key_observations は 3〜5 件
 - repeated_patterns は明日につながる観点を短く返す
 - coach_comment は学習者の傾向を自然な日本語で 1 つ
@@ -379,12 +393,20 @@ AI Coach Team 全体の consensus として返してください。
 - Observation を羅列しない
 - 肢番号の列挙にしない
 - Learner / Coach の会話全文を出さない
+- Summary は今日のストーリーを書く
+- Summary には「今日は何ができたか」と「今日はどこで少し迷ったか」だけを書く
+- Summary を知識要約にしない
+- 条文説明や法律知識の列挙を書かない
 - 今日できるようになったことを書く
 - 今日つまずいた観点を書く
 - 学習者の傾向を書く
 - 明日につながる観点を書く
+- key_observations は Knowledge Summary ではなく Learning Insights にする
+- key_observations は Observation を Insight に言い換える
 - 問題情報と explanation は、学びの整理に必要な範囲だけ使う
+- explanation をそのまま要約して出さない
 - 誤答後チャットがある場合は、理解が動いたポイントだけ反映する
+- 同じ内容を繰り返さない
 - 固定文言ではなく、与えられたデータに応じた内容にする
 
 daily_session:
