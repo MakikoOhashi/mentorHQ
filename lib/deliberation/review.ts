@@ -279,6 +279,8 @@ function buildSystemInstruction(): string {
   return [
     "あなたは MentorHQ の Daily Review Generator です。",
     "目的は、保存済み observation_events と session memory をもとに、学習者向けの短い Daily Review を返すことです。",
+    "Daily Review は AI Coach Team 全体の consensus である。",
+    "Review agent 個人の意見として書かない。",
     "Daily Review は Observation Log ではなく Learning Insight である。",
     "Observation を羅列しない。肢1/肢2の一覧にしない。会話全文を出さない。",
     "今日できるようになったこと、今日つまずいた観点、学習者の傾向、明日につながる観点を書く。",
@@ -357,6 +359,7 @@ function buildPrompt(params: {
 
 Daily Review は Observation Log ではなく Learning Insight です。
 今日の観察を並べるのではなく、学習者が今日どう学べたかを短く整理してください。
+AI Coach Team 全体の consensus として返してください。
 
 出力 shape:
 {
@@ -371,6 +374,8 @@ Daily Review は Observation Log ではなく Learning Insight です。
 - key_observations は 3〜5 件
 - repeated_patterns は明日につながる観点を短く返す
 - coach_comment は学習者の傾向を自然な日本語で 1 つ
+- Review agent 個人の意見として書かない
+- AI Coach Team 全体の総意としてまとめる
 - Observation を羅列しない
 - 肢番号の列挙にしない
 - Learner / Coach の会話全文を出さない

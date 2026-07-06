@@ -53,6 +53,12 @@ type IncorrectConversation = {
 
 type StatementResult = CorrectQuickFeedback | IncorrectConversation;
 
+type ReviewConsensusTurn = {
+  id: string;
+  speakerLabel: string;
+  text: string;
+};
+
 type FinalResult = {
   selectedIndex: number;
   correctIndex: number;
@@ -61,6 +67,8 @@ type FinalResult = {
 
 const MAX_VISIBLE_THOUGHTS = 12;
 const THOUGHT_REVEAL_DELAY_MS = 280;
+const REVIEW_CONSENSUS_REVEAL_DELAY_MS = 420;
+const REVIEW_CONSENSUS_SETTLE_DELAY_MS = 520;
 
 const STEP_ORDER: LearnerStep[] = [
   "morning",
@@ -186,6 +194,36 @@ function buildImmediateCoaching(
   };
 }
 
+function buildReviewConsensusTurns(): ReviewConsensusTurn[] {
+  return [
+    {
+      id: "review-reading",
+      speakerLabel: "Reading",
+      text: "今日の Observation は十分集まりました。"
+    },
+    {
+      id: "review-memory",
+      speakerLabel: "Memory",
+      text: "今日の Observation を過去と比較しています。"
+    },
+    {
+      id: "review-pattern",
+      speakerLabel: "Pattern",
+      text: "今日の理解の変化を整理しています。"
+    },
+    {
+      id: "review-review",
+      speakerLabel: "Review",
+      text: "今日の学習ポイントをまとめます。"
+    },
+    {
+      id: "review-consensus",
+      speakerLabel: "Consensus",
+      text: "Daily Review を学習者へ送ります。"
+    }
+  ];
+}
+
 
 export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const [learnerCase, setLearnerCase] = useState(initialCase);
@@ -212,7 +250,11 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const [visibleThoughtIds, setVisibleThoughtIds] = useState<string[]>([]);
   const [coachMindTurns, setCoachMindTurns] = useState<CoachMindTurn[]>([]);
   const [coachMindStatus, setCoachMindStatus] = useState<"idle" | "generating">("idle");
+  const [reviewConsensusTurns, setReviewConsensusTurns] = useState<ReviewConsensusTurn[]>([]);
+  const [visibleReviewConsensusIds, setVisibleReviewConsensusIds] = useState<string[]>([]);
+  const [reviewConsensusStatus, setReviewConsensusStatus] = useState<"idle" | "running" | "complete">("idle");
   const revealTimeoutIdsRef = useRef<number[]>([]);
+  const reviewConsensusTimeoutIdsRef = useRef<number[]>([]);
   const generatedThoughtObservationIdsRef = useRef<Set<string>>(new Set());
   const generatingThoughtObservationIdsRef = useRef<Set<string>>(new Set());
   const coachMindTurnsRef = useRef<CoachMindTurn[]>([]);
@@ -252,6 +294,9 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     setCoachMindTurns([]);
     setCoachMindStatus("idle");
     setVisibleThoughtIds([]);
+    setReviewConsensusTurns([]);
+    setVisibleReviewConsensusIds([]);
+    setReviewConsensusStatus("idle");
     generatedThoughtObservationIdsRef.current = new Set();
     generatingThoughtObservationIdsRef.current = new Set();
     coachMindTurnsRef.current = [];
@@ -312,6 +357,10 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     () => coachMindTurns.filter((turn) => visibleThoughtIds.includes(turn.id)),
     [coachMindTurns, visibleThoughtIds]
   );
+  const visibleReviewConsensusTurns = useMemo(
+    () => reviewConsensusTurns.filter((turn) => visibleReviewConsensusIds.includes(turn.id)),
+    [reviewConsensusTurns, visibleReviewConsensusIds]
+  );
   const isCoachThinking =
     sessionActionStatus !== "idle" ||
     reviewActionStatus === "generating" ||
@@ -335,6 +384,9 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       setCoachMindTurns([]);
       setCoachMindStatus("idle");
       setVisibleThoughtIds([]);
+      setReviewConsensusTurns([]);
+      setVisibleReviewConsensusIds([]);
+      setReviewConsensusStatus("idle");
       generatedThoughtObservationIdsRef.current = new Set();
       generatingThoughtObservationIdsRef.current = new Set();
       coachMindTurnsRef.current = [];
@@ -374,6 +426,40 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       revealTimeoutIdsRef.current = [];
     };
   }, [coachMindTurns]);
+
+  useEffect(() => {
+    const nextIds = reviewConsensusTurns.map((turn) => turn.id);
+
+    setVisibleReviewConsensusIds((current) => {
+      const retainedIds = current.filter((id) => nextIds.includes(id));
+      const knownIds = new Set(retainedIds);
+      const appendedIds = nextIds.filter((id) => !knownIds.has(id));
+
+      reviewConsensusTimeoutIdsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+      reviewConsensusTimeoutIdsRef.current = [];
+
+      appendedIds.forEach((id, index) => {
+        const timeoutId = window.setTimeout(() => {
+          setVisibleReviewConsensusIds((visible) => {
+            if (visible.includes(id)) {
+              return visible;
+            }
+
+            return [...visible, id];
+          });
+        }, index * REVIEW_CONSENSUS_REVEAL_DELAY_MS);
+
+        reviewConsensusTimeoutIdsRef.current.push(timeoutId);
+      });
+
+      return retainedIds;
+    });
+
+    return () => {
+      reviewConsensusTimeoutIdsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+      reviewConsensusTimeoutIdsRef.current = [];
+    };
+  }, [reviewConsensusTurns]);
 
   useEffect(() => {
     if (observations.length === 0) {
@@ -763,9 +849,14 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     }
 
     setReviewActionStatus("generating");
+    setReviewConsensusStatus("running");
+    setReviewConsensusTurns(buildReviewConsensusTurns());
+    setVisibleReviewConsensusIds([]);
     setErrorMessage(null);
 
     try {
+      const revealDuration =
+        (buildReviewConsensusTurns().length - 1) * REVIEW_CONSENSUS_REVEAL_DELAY_MS + REVIEW_CONSENSUS_SETTLE_DELAY_MS;
       const response = await fetch("/api/daily-session/review", {
         method: "POST",
         headers: {
@@ -782,9 +873,18 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       }
 
       const payload = (await response.json()) as DailySessionPayload;
-      applyDailySessionPayload(payload);
+      applyDailySessionPayload({
+        ...payload,
+        dailyReview: null
+      });
       setLearnerStepOverride("review");
+      await new Promise((resolve) => window.setTimeout(resolve, revealDuration));
+      setDailyReview(payload.dailyReview);
+      setReviewConsensusStatus("complete");
     } catch (error) {
+      setReviewConsensusTurns([]);
+      setVisibleReviewConsensusIds([]);
+      setReviewConsensusStatus("idle");
       setErrorMessage(error instanceof Error ? error.message : "Unknown error");
     } finally {
       setReviewActionStatus("idle");
@@ -828,6 +928,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
 
   const derivedStep = getCurrentStep(dailySession, tomorrowPlan);
   const currentStep = learnerStepOverride ?? derivedStep;
+  const isReviewConsensusActive = currentStep === "review" && reviewConsensusStatus !== "idle";
   const currentStepIndex = STEP_ORDER.indexOf(currentStep);
   const activeQuestionNumber =
     dailySession && dailySession.status !== "completed" ? dailySession.current_index + 1 : null;
@@ -841,6 +942,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const correctChoiceLabel = currentStatement ? getCorrectnessLabel(currentStatement.isCorrect) : "";
   const nextResultLabel =
     queuedNextPayload?.session.status === "completed" ? "今日のふりかえりへ" : "次の問題へ";
+  const displayedThoughtCount = isReviewConsensusActive ? visibleReviewConsensusTurns.length : visibleTurns.length;
+  const displayedThoughtLimit = isReviewConsensusActive ? reviewConsensusTurns.length : MAX_VISIBLE_THOUGHTS;
 
   return (
     <main className="demo-viewport">
@@ -1321,19 +1424,42 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
               <div>
                 <span className="panel-kicker">AI Coach Mind</span>
                 <h3>Live Thought Stream</h3>
-                <p className="device-caption">仮説が少しずつ更新されるライブ会話です。</p>
+                <p className="device-caption">
+                  {isReviewConsensusActive
+                    ? "Observation を受けて AI Coach Team が総意をまとめています。"
+                    : "仮説が少しずつ更新されるライブ会話です。"}
+                </p>
               </div>
               <div className="thought-stream-meta">
                 <span className={`thinking-pill ${isCoachThinking ? "is-active" : ""}`}>Thinking...</span>
                 <span className="observation-count-pill">
-                  {dailySession ? `${visibleTurns.length}/${MAX_VISIBLE_THOUGHTS}` : `0/${MAX_VISIBLE_THOUGHTS}`}
+                  {dailySession ? `${displayedThoughtCount}/${displayedThoughtLimit}` : `0/${displayedThoughtLimit}`}
                 </span>
               </div>
             </div>
 
             <div className="observation-stream-viewport">
               <div className="observation-list coach-thought-list">
-                {visibleTurns.length === 0 ? (
+                {isReviewConsensusActive ? (
+                  visibleReviewConsensusTurns.length === 0 ? (
+                    <div className="observation-empty-state">
+                      <p>Coach Team Deliberation...</p>
+                      <p>Observation をもとに総括をまとめています。</p>
+                    </div>
+                  ) : (
+                    visibleReviewConsensusTurns.map((turn, index) => (
+                      <section
+                        className={`mind-entry chat-row ${
+                          turn.speakerLabel === "Consensus" ? "is-latest-observation" : ""
+                        } stream-depth-${Math.min(visibleReviewConsensusTurns.length - 1 - index, 4)}`}
+                        key={turn.id}
+                      >
+                        <p className="mind-log-speaker">{turn.speakerLabel}</p>
+                        <p className="mind-log-line">{turn.text}</p>
+                      </section>
+                    ))
+                  )
+                ) : visibleTurns.length === 0 ? (
                   <div className="observation-empty-state">
                     <p>Thinking...</p>
                     <p>肢の回答後にライブ会話が始まります。</p>
