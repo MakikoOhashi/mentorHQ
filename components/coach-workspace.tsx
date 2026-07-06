@@ -10,6 +10,7 @@ import type {
   DailySession,
   LearnerCase,
   ObservationEvent,
+  ObservationEventInput,
   StatementChoice,
   TomorrowPlan
 } from "@/lib/deliberation/types";
@@ -27,6 +28,12 @@ type DailySessionPayload = {
   latestObservation: ObservationEvent | null;
   dailyReview: DailyReview | null;
   tomorrowPlan: TomorrowPlan | null;
+};
+
+type LocalObservationStatus = "pending" | "failed";
+
+type LocalObservationEvent = ObservationEvent & {
+  optimistic_status?: LocalObservationStatus;
 };
 
 type LearnerStep =
@@ -175,6 +182,75 @@ function buildTranscriptNote(
   return transcript.join("\n");
 }
 
+function buildOptimisticObservation(id: string, observation: ObservationEventInput): LocalObservationEvent {
+  return {
+    id,
+    daily_session_id: observation.daily_session_id,
+    question_id: observation.question_id,
+    question_index: observation.question_index,
+    statement_index: observation.statement_index ?? null,
+    learner_choice: observation.learner_choice ?? null,
+    correct_or_wrong: observation.correct_or_wrong ?? null,
+    learner_reason: observation.learner_reason ?? null,
+    reasoning_style: observation.reasoning_style ?? null,
+    intervention_type: observation.intervention_type,
+    misunderstanding_type: observation.misunderstanding_type,
+    answer_signal_score: observation.answer_signal_score,
+    observation_note: observation.observation_note ?? observation.note,
+    note: observation.note,
+    created_at: new Date().toISOString(),
+    optimistic_status: "pending"
+  };
+}
+
+function markOptimisticObservationFailed(
+  observations: LocalObservationEvent[],
+  tempObservationId: string
+): LocalObservationEvent[] {
+  return observations.map((observation) =>
+    observation.id === tempObservationId
+      ? {
+          ...observation,
+          optimistic_status: "failed"
+        }
+      : observation
+  );
+}
+
+function mergeSavedObservation(
+  current: LocalObservationEvent[],
+  tempObservationId: string,
+  savedObservations: ObservationEvent[]
+): LocalObservationEvent[] {
+  const savedIds = new Set(savedObservations.map((observation) => observation.id));
+  const withoutTemp = current.filter((observation) => observation.id !== tempObservationId && !savedIds.has(observation.id));
+  return [...withoutTemp, ...savedObservations];
+}
+
+function remapCoachMindTurnObservationIds(
+  turns: CoachMindTurn[],
+  tempObservationId: string,
+  savedObservationId: string
+): CoachMindTurn[] {
+  return turns.map((turn) =>
+    turn.source_observation_id === tempObservationId
+      ? {
+          ...turn,
+          id: turn.id.replace(tempObservationId, savedObservationId),
+          source_observation_id: savedObservationId
+        }
+      : turn
+  );
+}
+
+function remapVisibleThoughtIds(
+  visibleIds: string[],
+  tempObservationId: string,
+  savedObservationId: string
+): string[] {
+  return visibleIds.map((id) => id.replace(tempObservationId, savedObservationId));
+}
+
 function buildImmediateCoaching(
   statement: LearnerCase["statements"][number],
   choice: StatementChoice
@@ -261,8 +337,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const [learnerCase, setLearnerCase] = useState(initialCase);
   const [dailySession, setDailySession] = useState<DailySession | null>(null);
   const [currentQuestionId, setCurrentQuestionId] = useState<string | null>(null);
-  const [observations, setObservations] = useState<ObservationEvent[]>([]);
-  const [latestObservation, setLatestObservation] = useState<ObservationEvent | null>(null);
+  const [observations, setObservations] = useState<LocalObservationEvent[]>([]);
+  const [latestObservation, setLatestObservation] = useState<LocalObservationEvent | null>(null);
   const [dailyReview, setDailyReview] = useState<DailyReview | null>(null);
   const [tomorrowPlan, setTomorrowPlan] = useState<TomorrowPlan | null>(null);
   const [sessionActionStatus, setSessionActionStatus] = useState<"idle" | "starting" | "saving" | "advancing">("idle");
@@ -290,6 +366,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const reviewConsensusTimeoutIdsRef = useRef<number[]>([]);
   const generatedThoughtObservationIdsRef = useRef<Set<string>>(new Set());
   const generatingThoughtObservationIdsRef = useRef<Set<string>>(new Set());
+  const failedOptimisticObservationIdsRef = useRef<Set<string>>(new Set());
+  const optimisticObservationIdMapRef = useRef<Map<string, string>>(new Map());
   const coachMindTurnsRef = useRef<CoachMindTurn[]>([]);
   const previousSessionIdRef = useRef<string | null>(null);
 
@@ -304,6 +382,63 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     if (payload.learnerCase) {
       setLearnerCase(payload.learnerCase);
     }
+  }, []);
+
+  const appendOptimisticObservation = useCallback((observation: ObservationEventInput): string => {
+    const tempObservationId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const optimisticObservation = buildOptimisticObservation(tempObservationId, observation);
+
+    failedOptimisticObservationIdsRef.current.delete(tempObservationId);
+    setCoachMindStatus("generating");
+    setVisibleThoughtIds([]);
+    setObservations((current) => [...current, optimisticObservation]);
+    setLatestObservation(optimisticObservation);
+
+    return tempObservationId;
+  }, []);
+
+  const reconcileOptimisticObservation = useCallback((tempObservationId: string, payload: DailySessionPayload) => {
+    const savedObservation = payload.latestObservation ?? payload.observations.at(-1) ?? null;
+    const tempWasQueued =
+      generatedThoughtObservationIdsRef.current.has(tempObservationId) ||
+      generatingThoughtObservationIdsRef.current.has(tempObservationId);
+
+    if (savedObservation && tempWasQueued) {
+      optimisticObservationIdMapRef.current.set(tempObservationId, savedObservation.id);
+      generatedThoughtObservationIdsRef.current.add(savedObservation.id);
+      coachMindTurnsRef.current = remapCoachMindTurnObservationIds(
+        coachMindTurnsRef.current,
+        tempObservationId,
+        savedObservation.id
+      );
+      setCoachMindTurns((current) => remapCoachMindTurnObservationIds(current, tempObservationId, savedObservation.id));
+      setVisibleThoughtIds((current) => remapVisibleThoughtIds(current, tempObservationId, savedObservation.id));
+    }
+
+    setDailySession(payload.session);
+    setCurrentQuestionId(payload.currentQuestionId);
+    setObservations((current) => mergeSavedObservation(current, tempObservationId, payload.observations));
+    setLatestObservation(savedObservation);
+    setDailyReview(payload.dailyReview);
+    setTomorrowPlan(payload.tomorrowPlan);
+
+    if (payload.learnerCase) {
+      setLearnerCase(payload.learnerCase);
+    }
+  }, []);
+
+  const failOptimisticObservation = useCallback((tempObservationId: string) => {
+    failedOptimisticObservationIdsRef.current.add(tempObservationId);
+    generatingThoughtObservationIdsRef.current.delete(tempObservationId);
+    setObservations((current) => markOptimisticObservationFailed(current, tempObservationId));
+    setLatestObservation((current) =>
+      current?.id === tempObservationId
+        ? {
+            ...current,
+            optimistic_status: "failed"
+          }
+        : current
+    );
   }, []);
 
   const clearLearnerFlow = useCallback(() => {
@@ -333,6 +468,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     setConsensusMode(null);
     generatedThoughtObservationIdsRef.current = new Set();
     generatingThoughtObservationIdsRef.current = new Set();
+    failedOptimisticObservationIdsRef.current = new Set();
+    optimisticObservationIdMapRef.current = new Map();
     coachMindTurnsRef.current = [];
   }, [initialCase]);
 
@@ -374,7 +511,10 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   }, [applyDailySessionPayload]);
 
   const currentQuestionObservations = useMemo(
-    () => observations.filter((observation) => observation.question_id === currentQuestionId),
+    () =>
+      observations.filter(
+        (observation) => observation.question_id === currentQuestionId && observation.optimistic_status !== "failed"
+      ),
     [currentQuestionId, observations]
   );
   const completedStatementCount = useMemo(
@@ -424,6 +564,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       setConsensusMode(null);
       generatedThoughtObservationIdsRef.current = new Set();
       generatingThoughtObservationIdsRef.current = new Set();
+      failedOptimisticObservationIdsRef.current = new Set();
+      optimisticObservationIdMapRef.current = new Map();
       coachMindTurnsRef.current = [];
     }
   }, [dailySession?.id]);
@@ -502,12 +644,16 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       setCoachMindStatus("idle");
       generatedThoughtObservationIdsRef.current = new Set();
       generatingThoughtObservationIdsRef.current = new Set();
+      failedOptimisticObservationIdsRef.current = new Set();
+      optimisticObservationIdMapRef.current = new Map();
       coachMindTurnsRef.current = [];
       return;
     }
 
     const pendingObservations = observations.filter(
       (observation) =>
+        observation.optimistic_status !== "failed" &&
+        !failedOptimisticObservationIdsRef.current.has(observation.id) &&
         !generatedThoughtObservationIdsRef.current.has(observation.id) &&
         !generatingThoughtObservationIdsRef.current.has(observation.id)
     );
@@ -550,17 +696,20 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
           }
 
           const payload = (await response.json()) as CoachMindResponse;
+          const sourceObservationId = optimisticObservationIdMapRef.current.get(observation.id) ?? observation.id;
           const nextTurns = payload.turns.map((turn, index) => ({
             ...turn,
-            id: `${observation.id}-${turn.speaker}-${index}`,
-            source_observation_id: observation.id
+            id: `${sourceObservationId}-${turn.speaker}-${index}`,
+            source_observation_id: sourceObservationId
           })) satisfies CoachMindTurn[];
 
-          if (cancelled) {
+          if (cancelled || failedOptimisticObservationIdsRef.current.has(observation.id)) {
+            generatingThoughtObservationIdsRef.current.delete(observation.id);
             return;
           }
 
           generatedThoughtObservationIdsRef.current.add(observation.id);
+          generatedThoughtObservationIdsRef.current.add(sourceObservationId);
           generatingThoughtObservationIdsRef.current.delete(observation.id);
           coachMindTurnsRef.current = [...coachMindTurnsRef.current, ...nextTurns];
           setCoachMindTurns((current) => [...current, ...nextTurns]);
@@ -589,7 +738,9 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       dailySession?.status === "completed" ||
       queuedNextPayload ||
       finalResult ||
-      submittedStatementResult
+      submittedStatementResult ||
+      sessionActionStatus !== "idle" ||
+      questionPhase === "statement-result"
     ) {
       return;
     }
@@ -606,7 +757,9 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     dailySession?.status,
     finalResult,
     learnerCase,
+    questionPhase,
     queuedNextPayload,
+    sessionActionStatus,
     submittedStatementResult
   ]);
 
@@ -656,6 +809,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     setQuestionPhase("statement-result");
     setStatementChoice(choice);
 
+    let tempObservationId: string | null = null;
+
     try {
       const observation = buildStatementObservationInput({
         dailySessionId: dailySession.id,
@@ -665,6 +820,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
         statement: currentStatement,
         learnerChoice: choice
       });
+
+      tempObservationId = appendOptimisticObservation(observation);
 
       const response = await fetch("/api/daily-session/observation", {
         method: "POST",
@@ -683,8 +840,11 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
 
       const payload = (await response.json()) as DailySessionPayload;
       setSubmittedStatementResult(buildImmediateCoaching(currentStatement, choice));
-      applyDailySessionPayload(payload);
+      reconcileOptimisticObservation(tempObservationId, payload);
     } catch (error) {
+      if (tempObservationId) {
+        failOptimisticObservation(tempObservationId);
+      }
       setSubmittedStatementResult(null);
       setQuestionPhase("statement");
       setErrorMessage(error instanceof Error ? error.message : "Unknown error");
@@ -692,10 +852,12 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       setSessionActionStatus("idle");
     }
   }, [
-    applyDailySessionPayload,
+    appendOptimisticObservation,
     currentQuestionId,
     currentStatementIndex,
     dailySession,
+    failOptimisticObservation,
+    reconcileOptimisticObservation,
     learnerCase
   ]);
 
@@ -731,6 +893,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
 
     setSessionActionStatus("saving");
     setErrorMessage(null);
+
+    let tempObservationId: string | null = null;
 
     try {
       const learnerChatResponse = await fetch("/api/learner-chat", {
@@ -776,6 +940,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
         learnerNote: buildTranscriptNote(existingMessages, learnerMessage, replyText)
       });
 
+      tempObservationId = appendOptimisticObservation(observation);
+
       const response = await fetch("/api/daily-session/observation", {
         method: "POST",
         headers: {
@@ -806,19 +972,24 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
           : current
       );
       setIncorrectChatInput("");
-      applyDailySessionPayload(payload);
+      reconcileOptimisticObservation(tempObservationId, payload);
     } catch (error) {
+      if (tempObservationId) {
+        failOptimisticObservation(tempObservationId);
+      }
       setErrorMessage(error instanceof Error ? error.message : "Unknown error");
     } finally {
       setSessionActionStatus("idle");
     }
   }, [
-    applyDailySessionPayload,
+    appendOptimisticObservation,
     currentQuestionId,
     currentStatementIndex,
     dailySession,
+    failOptimisticObservation,
     incorrectChatInput,
     learnerCase,
+    reconcileOptimisticObservation,
     statementChoice,
     submittedStatementResult
   ]);
