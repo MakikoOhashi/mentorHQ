@@ -508,7 +508,6 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
 
     failedOptimisticObservationIdsRef.current.delete(tempObservationId);
     setCoachMindStatus("generating");
-    setVisibleThoughtIds([]);
     setObservations((current) => [...current, optimisticObservation]);
     setLatestObservation(optimisticObservation);
 
@@ -699,7 +698,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     const nextIds = coachMindTurns.map((turn) => turn.id);
 
     setVisibleThoughtIds((current) => {
-      const retainedIds = current.filter((id) => nextIds.includes(id)).slice(-MAX_VISIBLE_THOUGHTS);
+      const retainedIds = current.filter((id) => nextIds.includes(id));
       const knownIds = new Set(retainedIds);
       const appendedIds = nextIds.filter((id) => !knownIds.has(id));
 
@@ -713,7 +712,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
               return visible;
             }
 
-            return [...visible, id].slice(-MAX_VISIBLE_THOUGHTS);
+            return [...visible, id];
           });
         }, index * THOUGHT_REVEAL_DELAY_MS);
 
@@ -1260,7 +1259,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const nextResultLabel =
     queuedNextPayload?.session.status === "completed" ? "今日のふりかえりへ" : "次の問題へ";
   const displayedThoughtCount = isReviewConsensusActive ? visibleReviewConsensusTurns.length : visibleTurns.length;
-  const displayedThoughtLimit = isReviewConsensusActive ? reviewConsensusTurns.length : MAX_VISIBLE_THOUGHTS;
+  const displayedThoughtLimit = isReviewConsensusActive ? reviewConsensusTurns.length : coachMindTurns.length || MAX_VISIBLE_THOUGHTS;
 
   return (
     <main className="demo-viewport">
