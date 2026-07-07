@@ -142,7 +142,7 @@ function buildPatternTurn(
   previousObservation: ObservationEvent | null
 ): TurnDraft {
   if (currentIndex < 1 || !previousObservation) {
-    return { speaker: "pattern", dialogueMove: "defer", text: "まだ傾向を判断するには早そうです。" };
+    return { speaker: "pattern", dialogueMove: "defer", text: "現時点では、まだ傾向を判断するには早そうです。" };
   }
 
   const sameMisunderstandingCount = countPriorMatches(
@@ -154,7 +154,7 @@ function buildPatternTurn(
   );
 
   if (sameMisunderstandingCount >= 1) {
-    return { speaker: "pattern", dialogueMove: "recall", text: "同じ迷い方が続いています。" };
+    return { speaker: "pattern", dialogueMove: "recall", text: "この観察からは、同じ迷い方が続いているように見えます。" };
   }
 
   const sameReasoningCount = countPriorMatches(
@@ -164,7 +164,7 @@ function buildPatternTurn(
   );
 
   if (sameReasoningCount >= 2) {
-    return { speaker: "pattern", dialogueMove: "recall", text: "観察はまだ少なめですが、この入り方が少し続いています。" };
+    return { speaker: "pattern", dialogueMove: "recall", text: "観察はまだ少なめですが、この入り方が少し続いているように見えます。" };
   }
 
   const recentCorrectCount = observations
@@ -176,7 +176,7 @@ function buildPatternTurn(
   }
 
   if (recentCorrectCount >= 2 && observation.reasoning_style === "condition_based") {
-    return { speaker: "pattern", dialogueMove: "update_hypothesis", text: "複数の問題で条件を丁寧に確認しており、条件判断を重視する傾向があるかもしれません。" };
+    return { speaker: "pattern", dialogueMove: "update_hypothesis", text: "この観察からは、条件を丁寧に確認しながら考えているように見えます。" };
   }
 
   if (previousObservation.reasoning_style !== observation.reasoning_style) {
