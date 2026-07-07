@@ -76,6 +76,7 @@ type FinalResult = {
 
 const MAX_VISIBLE_THOUGHTS = 12;
 const THOUGHT_REVEAL_DELAY_MS = 280;
+const COACH_MIND_REVEAL_DELAY_MS = 750;
 const REVIEW_CONSENSUS_REVEAL_DELAY_MS = 420;
 const REVIEW_CONSENSUS_SETTLE_DELAY_MS = 520;
 
@@ -376,12 +377,51 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const [consensusMode, setConsensusMode] = useState<ConsensusMode | null>(null);
   const revealTimeoutIdsRef = useRef<number[]>([]);
   const reviewConsensusTimeoutIdsRef = useRef<number[]>([]);
+  const coachMindRevealTimeoutIdsRef = useRef<number[]>([]);
+  const coachMindRevealGenerationRef = useRef(0);
   const generatedThoughtObservationIdsRef = useRef<Set<string>>(new Set());
   const generatingThoughtObservationIdsRef = useRef<Set<string>>(new Set());
   const failedOptimisticObservationIdsRef = useRef<Set<string>>(new Set());
   const optimisticObservationIdMapRef = useRef<Map<string, string>>(new Map());
   const coachMindTurnsRef = useRef<CoachMindTurn[]>([]);
   const previousSessionIdRef = useRef<string | null>(null);
+
+  const clearCoachMindRevealQueue = useCallback(() => {
+    coachMindRevealTimeoutIdsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+    coachMindRevealTimeoutIdsRef.current = [];
+  }, []);
+
+  const bumpCoachMindRevealGeneration = useCallback(() => {
+    coachMindRevealGenerationRef.current += 1;
+    clearCoachMindRevealQueue();
+    return coachMindRevealGenerationRef.current;
+  }, [clearCoachMindRevealQueue]);
+
+  const enqueueCoachMindTurns = useCallback(
+    (turns: CoachMindTurn[], generationId: number) => {
+      if (turns.length === 0) {
+        return;
+      }
+
+      turns.forEach((turn, index) => {
+        const timeoutId = window.setTimeout(() => {
+          if (coachMindRevealGenerationRef.current !== generationId) {
+            return;
+          }
+
+          setCoachMindTurns((current) => [...current, turn]);
+          coachMindTurnsRef.current = [...coachMindTurnsRef.current, turn];
+
+          if (index === turns.length - 1) {
+            setCoachMindStatus(generatingThoughtObservationIdsRef.current.size > 0 ? "generating" : "idle");
+          }
+        }, index * COACH_MIND_REVEAL_DELAY_MS);
+
+        coachMindRevealTimeoutIdsRef.current.push(timeoutId);
+      });
+    },
+    []
+  );
 
   const applyDailySessionPayload = useCallback((payload: DailySessionPayload) => {
     setDailySession(payload.session);
@@ -484,12 +524,11 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
           turnCount: nextTurns.length
         });
 
-        generatedThoughtObservationIdsRef.current.add(observation.id);
-        generatedThoughtObservationIdsRef.current.add(sourceObservationId);
-        generatingThoughtObservationIdsRef.current.delete(observation.id);
-        coachMindTurnsRef.current = [...coachMindTurnsRef.current, ...nextTurns];
-        setCoachMindTurns((current) => [...current, ...nextTurns]);
-        setCoachMindStatus(generatingThoughtObservationIdsRef.current.size > 0 ? "generating" : "idle");
+      generatedThoughtObservationIdsRef.current.add(observation.id);
+      generatedThoughtObservationIdsRef.current.add(sourceObservationId);
+      generatingThoughtObservationIdsRef.current.delete(observation.id);
+        const generationId = bumpCoachMindRevealGeneration();
+        enqueueCoachMindTurns(nextTurns, generationId);
       } catch (error) {
         generatingThoughtObservationIdsRef.current.delete(observation.id);
         console.error("[coach-mind][ui] generation failed", {
@@ -499,7 +538,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
         setCoachMindStatus(generatingThoughtObservationIdsRef.current.size > 0 ? "generating" : "error");
       }
     },
-    []
+    [bumpCoachMindRevealGeneration, enqueueCoachMindTurns]
   );
 
   const appendOptimisticObservation = useCallback((observation: ObservationEventInput): LocalObservationEvent => {
@@ -566,6 +605,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   }, []);
 
   const clearLearnerFlow = useCallback(() => {
+    bumpCoachMindRevealGeneration();
     setDailySession(null);
     setCurrentQuestionId(null);
     setObservations([]);
@@ -595,7 +635,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     failedOptimisticObservationIdsRef.current = new Set();
     optimisticObservationIdMapRef.current = new Map();
     coachMindTurnsRef.current = [];
-  }, [initialCase]);
+  }, [bumpCoachMindRevealGeneration, initialCase]);
 
   useEffect(() => {
     let cancelled = false;
@@ -679,6 +719,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
 
     if (previousSessionIdRef.current !== nextSessionId) {
       previousSessionIdRef.current = nextSessionId;
+      bumpCoachMindRevealGeneration();
       setCoachMindTurns([]);
       setCoachMindStatus("idle");
       setVisibleThoughtIds([]);
@@ -692,7 +733,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       optimisticObservationIdMapRef.current = new Map();
       coachMindTurnsRef.current = [];
     }
-  }, [dailySession?.id]);
+  }, [bumpCoachMindRevealGeneration, dailySession?.id]);
 
   useEffect(() => {
     const nextIds = coachMindTurns.map((turn) => turn.id);
@@ -764,6 +805,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
 
   useEffect(() => {
     if (observations.length === 0) {
+      bumpCoachMindRevealGeneration();
       setCoachMindTurns([]);
       setCoachMindStatus("idle");
       generatedThoughtObservationIdsRef.current = new Set();
@@ -773,7 +815,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       coachMindTurnsRef.current = [];
       return;
     }
-  }, [observations.length]);
+  }, [bumpCoachMindRevealGeneration, observations.length]);
 
   useEffect(() => {
     if (!currentQuestionId || dailySession?.status === "completed") {
