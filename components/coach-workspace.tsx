@@ -773,23 +773,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       coachMindTurnsRef.current = [];
       return;
     }
-
-    const pendingObservations = observations.filter(
-      (observation) =>
-        observation.optimistic_status !== "failed" &&
-        !failedOptimisticObservationIdsRef.current.has(observation.id) &&
-        !generatedThoughtObservationIdsRef.current.has(observation.id) &&
-        !generatingThoughtObservationIdsRef.current.has(observation.id)
-    );
-
-    if (pendingObservations.length === 0) {
-      return;
-    }
-
-    pendingObservations.forEach((observation) => {
-      void generateCoachMindForObservation(observation, observations);
-    });
-  }, [generateCoachMindForObservation, observations]);
+  }, [observations.length]);
 
   useEffect(() => {
     if (!currentQuestionId || dailySession?.status === "completed") {
