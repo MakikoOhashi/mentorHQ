@@ -104,6 +104,14 @@ const STATEMENT_OPTIONS: Array<{ label: string; value: StatementChoice }> = [
   { label: "× 誤り", value: "incorrect" }
 ];
 
+const QUESTION_PHASE_RANK: Record<QuestionPhase, number> = {
+  stem: 0,
+  statement: 1,
+  "statement-result": 2,
+  final: 3,
+  result: 4
+};
+
 function getStatementChoiceLabel(choice: StatementChoice | null): string {
   if (choice === "correct") {
     return "○ 正しい";
@@ -163,6 +171,10 @@ function getQuestionPhaseFromObservations(learnerCase: LearnerCase | null, quest
   }
 
   return "final";
+}
+
+function getForwardQuestionPhase(current: QuestionPhase, next: QuestionPhase): QuestionPhase {
+  return QUESTION_PHASE_RANK[next] < QUESTION_PHASE_RANK[current] ? current : next;
 }
 
 function buildPointLine(statement: LearnerCase["statements"][number]): string {
@@ -733,6 +745,21 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   }, [observations]);
 
   useEffect(() => {
+    if (!currentQuestionId || dailySession?.status === "completed") {
+      return;
+    }
+
+    setQuestionPhase("stem");
+    setCurrentStatementIndex(completedStatementCount);
+    setStatementChoice(null);
+    setIncorrectChatInput("");
+    setFinalChoice(null);
+  }, [
+    currentQuestionId,
+    dailySession?.status
+  ]);
+
+  useEffect(() => {
     if (
       !currentQuestionId ||
       dailySession?.status === "completed" ||
@@ -745,7 +772,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       return;
     }
 
-    setQuestionPhase(getQuestionPhaseFromObservations(learnerCase, currentQuestionObservations));
+    const nextPhase = getQuestionPhaseFromObservations(learnerCase, currentQuestionObservations);
+    setQuestionPhase((current) => getForwardQuestionPhase(current, nextPhase));
     setCurrentStatementIndex(completedStatementCount);
     setStatementChoice(null);
     setIncorrectChatInput("");
