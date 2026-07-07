@@ -369,7 +369,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const [queuedNextPayload, setQueuedNextPayload] = useState<DailySessionPayload | null>(null);
   const [visibleThoughtIds, setVisibleThoughtIds] = useState<string[]>([]);
   const [coachMindTurns, setCoachMindTurns] = useState<CoachMindTurn[]>([]);
-  const [coachMindStatus, setCoachMindStatus] = useState<"idle" | "generating">("idle");
+  const [coachMindStatus, setCoachMindStatus] = useState<"idle" | "generating" | "error">("idle");
   const [reviewConsensusTurns, setReviewConsensusTurns] = useState<ReviewConsensusTurn[]>([]);
   const [visibleReviewConsensusIds, setVisibleReviewConsensusIds] = useState<string[]>([]);
   const [reviewConsensusStatus, setReviewConsensusStatus] = useState<"idle" | "running" | "complete">("idle");
@@ -396,7 +396,113 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     }
   }, []);
 
-  const appendOptimisticObservation = useCallback((observation: ObservationEventInput): string => {
+  const generateCoachMindForObservation = useCallback(
+    async (observation: LocalObservationEvent, sourceObservations: LocalObservationEvent[]) => {
+      if (
+        observation.optimistic_status === "failed" ||
+        failedOptimisticObservationIdsRef.current.has(observation.id) ||
+        generatedThoughtObservationIdsRef.current.has(observation.id) ||
+        generatingThoughtObservationIdsRef.current.has(observation.id)
+      ) {
+        console.info("[coach-mind][ui] generation skipped", {
+          observationId: observation.id,
+          optimisticStatus: observation.optimistic_status ?? "saved"
+        });
+        return;
+      }
+
+      const observationIndex = sourceObservations.findIndex((candidate) => candidate.id === observation.id);
+      const recentObservations =
+        observationIndex >= 0
+          ? sourceObservations.slice(Math.max(0, observationIndex - 4), observationIndex + 1)
+          : [observation];
+
+      generatingThoughtObservationIdsRef.current.add(observation.id);
+      setCoachMindStatus("generating");
+
+      console.info("[coach-mind][ui] generation started", {
+        observationId: observation.id,
+        optimisticStatus: observation.optimistic_status ?? "saved",
+        recentObservationCount: recentObservations.length
+      });
+
+      try {
+        const requestPayload = {
+          latestObservation: observation,
+          recentObservations,
+          existingThoughts: coachMindTurnsRef.current.slice(-8).map((turn) => ({
+            speaker: turn.speaker,
+            speakerLabel: turn.speakerLabel,
+            text: turn.text
+          }))
+        };
+
+        console.info("[coach-mind][ui] request", {
+          latestObservationId: requestPayload.latestObservation.id,
+          recentObservationIds: requestPayload.recentObservations.map((item) => item.id),
+          existingThoughtCount: requestPayload.existingThoughts.length
+        });
+
+        const response = await fetch("/api/coach-mind", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(requestPayload)
+        });
+
+        console.info("[coach-mind][ui] response", {
+          observationId: observation.id,
+          ok: response.ok,
+          status: response.status
+        });
+
+        if (!response.ok) {
+          throw new Error("Coach mind generation failed.");
+        }
+
+        const payload = (await response.json()) as CoachMindResponse;
+        const sourceObservationId = optimisticObservationIdMapRef.current.get(observation.id) ?? observation.id;
+        const nextTurns = payload.turns.map((turn, index) => ({
+          ...turn,
+          id: `${sourceObservationId}-${turn.speaker}-${index}`,
+          source_observation_id: sourceObservationId
+        })) satisfies CoachMindTurn[];
+
+        if (failedOptimisticObservationIdsRef.current.has(observation.id)) {
+          generatingThoughtObservationIdsRef.current.delete(observation.id);
+          console.warn("[coach-mind][ui] response ignored for failed optimistic observation", {
+            observationId: observation.id
+          });
+          setCoachMindStatus(generatingThoughtObservationIdsRef.current.size > 0 ? "generating" : "error");
+          return;
+        }
+
+        console.info("[coach-mind][ui] turns ready", {
+          observationId: observation.id,
+          sourceObservationId,
+          turnCount: nextTurns.length
+        });
+
+        generatedThoughtObservationIdsRef.current.add(observation.id);
+        generatedThoughtObservationIdsRef.current.add(sourceObservationId);
+        generatingThoughtObservationIdsRef.current.delete(observation.id);
+        coachMindTurnsRef.current = [...coachMindTurnsRef.current, ...nextTurns];
+        setCoachMindTurns((current) => [...current, ...nextTurns]);
+        setCoachMindStatus(generatingThoughtObservationIdsRef.current.size > 0 ? "generating" : "idle");
+      } catch (error) {
+        generatingThoughtObservationIdsRef.current.delete(observation.id);
+        console.error("[coach-mind][ui] generation failed", {
+          observationId: observation.id,
+          error
+        });
+        setCoachMindStatus(generatingThoughtObservationIdsRef.current.size > 0 ? "generating" : "error");
+      }
+    },
+    []
+  );
+
+  const appendOptimisticObservation = useCallback((observation: ObservationEventInput): LocalObservationEvent => {
     const tempObservationId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const optimisticObservation = buildOptimisticObservation(tempObservationId, observation);
 
@@ -406,7 +512,13 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     setObservations((current) => [...current, optimisticObservation]);
     setLatestObservation(optimisticObservation);
 
-    return tempObservationId;
+    console.info("[coach-mind][ui] optimistic observation appended", {
+      observationId: tempObservationId,
+      questionId: observation.question_id,
+      statementIndex: observation.statement_index
+    });
+
+    return optimisticObservation;
   }, []);
 
   const reconcileOptimisticObservation = useCallback((tempObservationId: string, payload: DailySessionPayload) => {
@@ -442,6 +554,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const failOptimisticObservation = useCallback((tempObservationId: string) => {
     failedOptimisticObservationIdsRef.current.add(tempObservationId);
     generatingThoughtObservationIdsRef.current.delete(tempObservationId);
+    setCoachMindStatus(generatingThoughtObservationIdsRef.current.size > 0 ? "generating" : "error");
     setObservations((current) => markOptimisticObservationFailed(current, tempObservationId));
     setLatestObservation((current) =>
       current?.id === tempObservationId
@@ -674,75 +787,10 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       return;
     }
 
-    pendingObservations.forEach((observation) => generatingThoughtObservationIdsRef.current.add(observation.id));
-
-    let cancelled = false;
-
-    async function generateThoughts() {
-      setCoachMindStatus("generating");
-
-      try {
-        for (const observation of pendingObservations) {
-          const observationIndex = observations.findIndex((candidate) => candidate.id === observation.id);
-          const recentObservations =
-            observationIndex >= 0 ? observations.slice(Math.max(0, observationIndex - 4), observationIndex + 1) : [observation];
-
-          const response = await fetch("/api/coach-mind", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-              latestObservation: observation,
-              recentObservations,
-              existingThoughts: coachMindTurnsRef.current.slice(-8).map((turn) => ({
-                speaker: turn.speaker,
-                speakerLabel: turn.speakerLabel,
-                text: turn.text
-              }))
-            })
-          });
-
-          if (!response.ok) {
-            throw new Error("Coach mind generation failed.");
-          }
-
-          const payload = (await response.json()) as CoachMindResponse;
-          const sourceObservationId = optimisticObservationIdMapRef.current.get(observation.id) ?? observation.id;
-          const nextTurns = payload.turns.map((turn, index) => ({
-            ...turn,
-            id: `${sourceObservationId}-${turn.speaker}-${index}`,
-            source_observation_id: sourceObservationId
-          })) satisfies CoachMindTurn[];
-
-          if (cancelled || failedOptimisticObservationIdsRef.current.has(observation.id)) {
-            generatingThoughtObservationIdsRef.current.delete(observation.id);
-            return;
-          }
-
-          generatedThoughtObservationIdsRef.current.add(observation.id);
-          generatedThoughtObservationIdsRef.current.add(sourceObservationId);
-          generatingThoughtObservationIdsRef.current.delete(observation.id);
-          coachMindTurnsRef.current = [...coachMindTurnsRef.current, ...nextTurns];
-          setCoachMindTurns((current) => [...current, ...nextTurns]);
-        }
-      } catch {
-        pendingObservations.forEach((observation) => {
-          generatingThoughtObservationIdsRef.current.delete(observation.id);
-        });
-      } finally {
-        if (!cancelled) {
-          setCoachMindStatus(generatingThoughtObservationIdsRef.current.size > 0 ? "generating" : "idle");
-        }
-      }
-    }
-
-    void generateThoughts();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [observations]);
+    pendingObservations.forEach((observation) => {
+      void generateCoachMindForObservation(observation, observations);
+    });
+  }, [generateCoachMindForObservation, observations]);
 
   useEffect(() => {
     if (!currentQuestionId || dailySession?.status === "completed") {
@@ -837,7 +885,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     setQuestionPhase("statement-result");
     setStatementChoice(choice);
 
-    let tempObservationId: string | null = null;
+    let optimisticObservation: LocalObservationEvent | null = null;
 
     try {
       const observation = buildStatementObservationInput({
@@ -849,7 +897,11 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
         learnerChoice: choice
       });
 
-      tempObservationId = appendOptimisticObservation(observation);
+      optimisticObservation = appendOptimisticObservation(observation);
+      console.info("[coach-mind][ui] submit starting coach mind generation", {
+        observationId: optimisticObservation.id
+      });
+      void generateCoachMindForObservation(optimisticObservation, [...observations, optimisticObservation]);
 
       const response = await fetch("/api/daily-session/observation", {
         method: "POST",
@@ -868,10 +920,10 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
 
       const payload = (await response.json()) as DailySessionPayload;
       setSubmittedStatementResult(buildImmediateCoaching(currentStatement, choice));
-      reconcileOptimisticObservation(tempObservationId, payload);
+      reconcileOptimisticObservation(optimisticObservation.id, payload);
     } catch (error) {
-      if (tempObservationId) {
-        failOptimisticObservation(tempObservationId);
+      if (optimisticObservation) {
+        failOptimisticObservation(optimisticObservation.id);
       }
       setSubmittedStatementResult(null);
       setQuestionPhase("statement");
@@ -885,6 +937,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     currentStatementIndex,
     dailySession,
     failOptimisticObservation,
+    generateCoachMindForObservation,
+    observations,
     reconcileOptimisticObservation,
     learnerCase
   ]);
@@ -922,7 +976,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     setSessionActionStatus("saving");
     setErrorMessage(null);
 
-    let tempObservationId: string | null = null;
+    let optimisticObservation: LocalObservationEvent | null = null;
 
     try {
       const learnerChatResponse = await fetch("/api/learner-chat", {
@@ -968,7 +1022,11 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
         learnerNote: buildTranscriptNote(existingMessages, learnerMessage, replyText)
       });
 
-      tempObservationId = appendOptimisticObservation(observation);
+      optimisticObservation = appendOptimisticObservation(observation);
+      console.info("[coach-mind][ui] chat submit starting coach mind generation", {
+        observationId: optimisticObservation.id
+      });
+      void generateCoachMindForObservation(optimisticObservation, [...observations, optimisticObservation]);
 
       const response = await fetch("/api/daily-session/observation", {
         method: "POST",
@@ -1000,10 +1058,10 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
           : current
       );
       setIncorrectChatInput("");
-      reconcileOptimisticObservation(tempObservationId, payload);
+      reconcileOptimisticObservation(optimisticObservation.id, payload);
     } catch (error) {
-      if (tempObservationId) {
-        failOptimisticObservation(tempObservationId);
+      if (optimisticObservation) {
+        failOptimisticObservation(optimisticObservation.id);
       }
       setErrorMessage(error instanceof Error ? error.message : "Unknown error");
     } finally {
@@ -1015,8 +1073,10 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     currentStatementIndex,
     dailySession,
     failOptimisticObservation,
+    generateCoachMindForObservation,
     incorrectChatInput,
     learnerCase,
+    observations,
     reconcileOptimisticObservation,
     statementChoice,
     submittedStatementResult
@@ -1726,7 +1786,9 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                   <div className="observation-empty-state">
                     <p>Thinking...</p>
                     <p>
-                      {coachMindStatus === "generating"
+                      {coachMindStatus === "error"
+                        ? "AI Coach Team の生成に失敗しました。もう一度回答を確認してください。"
+                        : coachMindStatus === "generating"
                         ? "AI Coach Team が回答を確認しています。"
                         : "肢の回答後にライブ会話が始まります。"}
                     </p>
