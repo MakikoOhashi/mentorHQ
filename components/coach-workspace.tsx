@@ -1725,7 +1725,11 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                 ) : visibleTurns.length === 0 ? (
                   <div className="observation-empty-state">
                     <p>Thinking...</p>
-                    <p>肢の回答後にライブ会話が始まります。</p>
+                    <p>
+                      {coachMindStatus === "generating"
+                        ? "AI Coach Team が回答を確認しています。"
+                        : "肢の回答後にライブ会話が始まります。"}
+                    </p>
                   </div>
                 ) : (
                   visibleTurns.map((turn, index) => {
