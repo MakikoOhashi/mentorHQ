@@ -30,7 +30,7 @@ const SPEAKER_LABELS: Record<CoachMindSpeaker, string> = {
 const FALLBACK_TURNS: CoachMindTurnOutput[] = [
   { speaker: "reading", speakerLabel: "Reading", text: "今回はここで止まった。" },
   { speaker: "memory", speakerLabel: "Memory", text: "たしかに。まだ比較材料が少ない。" },
-  { speaker: "pattern", speakerLabel: "Pattern", text: "それなら傾向は保留。" },
+  { speaker: "pattern", speakerLabel: "Pattern", text: "現時点では、傾向は保留。" },
   { speaker: "review", speakerLabel: "Review", text: "一旦保留。Review候補。" }
 ];
 
@@ -128,6 +128,8 @@ function buildSystemInstruction(): string {
     "Pattern は observation が 3 件未満なら強い傾向を述べない。判断は保留し、仮説段階にとどめる。",
     "Pattern は observation が 1〜2 件のときは『まだ観察数が少ないため判断を保留する』『現時点では仮説段階』『引き続き観察したい』のような慎重な表現を優先する。",
     "Pattern は observation が 3 件以上になってから、はじめて『〜する傾向があるかもしれない』『〜を重視している可能性がある』のような仮説を置く。",
+    "Pattern の文頭では『それなら。』を使わない。代わりに『現時点では、』『この観察からは、』『そのため、』のような自然な接続を使う。",
+    "Pattern は『定着している』より『安定している』『理解が進んでいる可能性がある』のように少し弱める。",
     "Pattern は Observation に存在しない事実を書かない。",
     "Review は今日は何を持ち帰るかの候補だけを短く置く。結論は出さない。",
     "出力は JSON のみで、Markdown やコードフェンスは禁止です。"
@@ -192,6 +194,8 @@ ${JSON.stringify(learnerChatHistory, null, 2)}`
 - Pattern は observation が 3 件未満なら強い傾向を述べない
 - Pattern は observation が 1〜2 件のときは判断を保留し、仮説段階にとどめる
 - Pattern は observation が 3 件以上になってから、はじめて弱めの仮説を置く
+- Pattern の文頭で「それなら。」は使わず、「現時点では、」「この観察からは、」「そのため、」を使う
+- Pattern は「定着している」より「安定している」「理解が進んでいる可能性がある」程度に弱める
 - Pattern は Observation に存在しない事実を書かない
 - Review は結論を出さず、保留だけ置く
 - Reading は観測できた事実だけを書く
@@ -225,6 +229,7 @@ ${JSON.stringify(learnerChatHistory, null, 2)}`
 - Reading: 「今回は『知った時』で止まった。」
 - Memory: 「たしかに。前の問題では用語を見ていたけれど、今回は条件を見ている。」
 - Pattern: 「それなら条件を整理しながら考える傾向がありそう。」
+- Pattern: 「現時点では、条件を整理しながら考えている可能性がある。」
 - Pattern: 「まだ観察数が少ないため、条件判断については引き続き観察したい。」
 - Review: 「一旦保留。あと数問見たい。」
 
