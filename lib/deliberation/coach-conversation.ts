@@ -164,22 +164,26 @@ function buildPatternTurn(
   );
 
   if (sameReasoningCount >= 2) {
-    return { speaker: "pattern", dialogueMove: "recall", text: "この入り方が少し続いています。" };
+    return { speaker: "pattern", dialogueMove: "recall", text: "観察はまだ少なめですが、この入り方が少し続いています。" };
   }
 
   const recentCorrectCount = observations
     .slice(Math.max(0, currentIndex - 2), currentIndex + 1)
     .filter((candidate) => candidate.correct_or_wrong === "correct").length;
 
+  if (currentIndex + 1 < 3) {
+    return { speaker: "pattern", dialogueMove: "defer", text: "まだ観察数が少ないため、判断は保留したいです。" };
+  }
+
   if (recentCorrectCount >= 2 && observation.reasoning_style === "condition_based") {
-    return { speaker: "pattern", dialogueMove: "update_hypothesis", text: "少し安定してきたかもしれません。" };
+    return { speaker: "pattern", dialogueMove: "update_hypothesis", text: "複数の問題で条件を丁寧に確認しており、条件判断を重視する傾向があるかもしれません。" };
   }
 
   if (previousObservation.reasoning_style !== observation.reasoning_style) {
-    return { speaker: "pattern", dialogueMove: "update_hypothesis", text: "今回は前と違う入り方です。" };
+    return { speaker: "pattern", dialogueMove: "update_hypothesis", text: "前の問題より、今回は入り方が少し違います。" };
   }
 
-  return { speaker: "pattern", dialogueMove: "defer", text: "まだ傾向を判断するには早そうです。" };
+  return { speaker: "pattern", dialogueMove: "defer", text: "現時点では仮説段階なので、引き続き観察したいです。" };
 }
 
 function buildLawTurn(observation: ObservationEvent): TurnDraft {
