@@ -101,35 +101,35 @@ function buildMemoryTurn(
   const previousLength = previousReason.length;
 
   if (currentReason && previousReason && currentLength >= previousLength + 10) {
-    return { speaker: "memory", dialogueMove: "extend", text: "今回は理由まで言えています。" };
+    return { speaker: "memory", dialogueMove: "extend", text: "前の問題より、今回は理由まで言えています。" };
   }
 
   if (currentReason && previousReason && currentLength <= Math.max(previousLength - 10, 6)) {
-    return { speaker: "memory", dialogueMove: "recall", text: "今回は説明が少し短くなっています。" };
+    return { speaker: "memory", dialogueMove: "recall", text: "前の問題より、今回は説明が少し短くなっています。" };
   }
 
   if (previousObservation.reasoning_style !== observation.reasoning_style) {
     if (observation.reasoning_style === "condition_based") {
-      return { speaker: "memory", dialogueMove: "update_hypothesis", text: "今回は条件を見ながら考えています。" };
+      return { speaker: "memory", dialogueMove: "update_hypothesis", text: "前の問題より、今回は条件を見ながら考えています。" };
     }
 
     if (observation.reasoning_style === "memory_based") {
-      return { speaker: "memory", dialogueMove: "recall", text: "今回も覚えている知識が先に出ています。" };
+      return { speaker: "memory", dialogueMove: "recall", text: "前の問題と同じく、今回は覚えている知識が先に出ています。" };
     }
 
     if (observation.reasoning_style === "uncertainty") {
-      return { speaker: "memory", dialogueMove: "defer", text: "今回は迷いが言葉に出ています。" };
+      return { speaker: "memory", dialogueMove: "defer", text: "前の問題より、今回は迷いが言葉に出ています。" };
     }
   }
 
   if (currentReason && previousReason && currentReason === previousReason) {
-    return { speaker: "memory", dialogueMove: "recall", text: "今回も同じ言い方が理由になっています。" };
+    return { speaker: "memory", dialogueMove: "recall", text: "前の問題と同じように、今回は同じ言い方が理由になっています。" };
   }
 
   if (previousObservation.correct_or_wrong !== observation.correct_or_wrong) {
     return observation.correct_or_wrong === "correct"
-      ? { speaker: "memory", dialogueMove: "extend", text: "今回は判断が合っています。" }
-      : { speaker: "memory", dialogueMove: "recall", text: "今回は判断が揺れています。" };
+      ? { speaker: "memory", dialogueMove: "extend", text: "前の問題より、今回は判断が合っています。" }
+      : { speaker: "memory", dialogueMove: "recall", text: "前の問題より、今回は判断が揺れています。" };
   }
 
   return { speaker: "memory", dialogueMove: "defer", text: "比較材料はまだ少ないですね。" };
