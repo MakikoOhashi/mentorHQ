@@ -34,6 +34,19 @@ const FALLBACK_TURNS: CoachMindTurnOutput[] = [
   { speaker: "review", speakerLabel: "Review", text: "一旦保留。Review候補。" }
 ];
 
+const FALLBACK_PROBLEM_REVIEW_TURNS: CoachMindTurnOutput[] = [
+  { speaker: "reading", speakerLabel: "Reading", text: "この問題では、4つの肢を通して条件を確認していた。" },
+  { speaker: "memory", speakerLabel: "Memory", text: "各肢で判断の軸は大きくぶれていない。" },
+  { speaker: "pattern", speakerLabel: "Pattern", text: "現時点では、条件の整理が進んでいる可能性がある。" },
+  { speaker: "review", speakerLabel: "Review", text: "別テーマでも同じ整理ができるか見たい。" }
+];
+
+type ProblemReviewFinalResult = {
+  selectedIndex: number;
+  correctIndex: number;
+  summary: string;
+};
+
 function truncateForLog(value: string, maxLength = 1000): string {
   return value.length > maxLength ? `${value.slice(0, maxLength)}…[truncated]` : value;
 }
@@ -93,6 +106,96 @@ function buildStatementPromptContext(statement: QuestionStatement | null) {
     correct_label: statement.isCorrect ? "correct" : "incorrect",
     statement_explanation: statement.explanation
   };
+}
+
+function buildProblemReviewSystemInstruction(): string {
+  return [
+    "あなたは MentorHQ の AI Coach Team です。",
+    "目的は、1問全体の Observation と最終回答結果を読み、この問題に限った Coach Review を作ることです。",
+    "これは Daily Review ではない。Tomorrow Plan でもない。1問の総括だけを書く。",
+    "文体は短い内部会話。Reading → Memory → Pattern → Review の順で 4 turns を返す。",
+    "各 agent は前の agent に短く反応してから自分の意見を言う。",
+    "問題の正答率や点数の話に寄せない。何を理解しているかを中心に書く。",
+    "Observation に存在しない事実は書かない。",
+    "観測されていないことは推測しない。",
+    "Reading はこの問題全体で実際に起きたことを一言でまとめる。",
+    "Memory は各肢 Observation の差分を比較する。正誤の回数ではなく、理解の変化を見る。",
+    "Pattern は問題テーマから一段抽象化して、学習者モデルの仮説を書く。",
+    "Pattern は『正答率が安定』のように成績分析へ寄せない。",
+    "Pattern は『何を理解できているか』を言う。",
+    "Observation が少ない場合は断定しない。",
+    "Review は次に別テーマで何を確かめたいかを短く置く。",
+    "出力は JSON のみで、Markdown やコードフェンスは禁止です。"
+  ].join("\n");
+}
+
+function buildProblemReviewUserPrompt(params: {
+  latestObservation: ObservationEvent;
+  observations: ObservationEvent[];
+  currentQuestion: {
+    exam: string;
+    theme: string;
+    questionTitle: string;
+    questionStem: string;
+    statements: Array<{
+      text: string;
+      isCorrect: boolean;
+      explanation: string;
+    }>;
+  } | null;
+  finalResult: ProblemReviewFinalResult;
+  existingThoughts: CoachMindTurnOutput[];
+}): string {
+  const latestObservation = buildObservationPromptContext(params.latestObservation);
+  const observations = params.observations.map((observation) => buildObservationPromptContext(observation));
+
+  return `次の情報をもとに、1問全体の Coach Review を 4 turns で生成してください。
+
+出力 shape:
+{
+  "turns": [
+    { "speaker": "reading", "speakerLabel": "Reading", "text": "..." },
+    { "speaker": "memory", "speakerLabel": "Memory", "text": "..." },
+    { "speaker": "pattern", "speakerLabel": "Pattern", "text": "..." },
+    { "speaker": "review", "speakerLabel": "Review", "text": "..." }
+  ]
+}
+
+ルール:
+- これは Daily Review ではない。1問だけの Coach Review にする
+- turns は必ず reading, memory, pattern, review の順
+- 各 text は日本語で 1〜2 文
+- 文体は内部会話。短いメモにする
+- Reading 以外は、前の agent に一度だけ短く反応してから話す
+- Reading はこの問題全体で実際に起きたことをまとめる
+- Memory は 4 肢の Observation を比較して書く
+- Memory は正誤の回数ではなく、理解の変化を見る
+- Pattern はこの問題のテーマと statement 内容から、何を理解し始めているかを一段抽象化して書く
+- Pattern は「正答率が安定」ではなく「何を理解できているか」を書く
+- Review は次に別テーマで何を確かめたいかだけを短く置く
+- Observation に存在しない事実は作らない
+- 観測されていないことは推測しない
+- finalResult は最終回答の結果を示すが、成績分析には使わない
+- Observation が少ない場合は断定しない
+- これは 1 問の Coach Review であり、Daily Review でも Tomorrow Plan でもない
+- existingThoughts と同じ表現の繰り返しは避ける
+- 敬語禁止。報告書禁止
+
+currentQuestion:
+${JSON.stringify(params.currentQuestion, null, 2)}
+
+finalResult:
+${JSON.stringify(params.finalResult, null, 2)}
+
+latestObservation:
+${JSON.stringify(latestObservation, null, 2)}
+
+observations:
+${JSON.stringify(observations, null, 2)}
+
+existingThoughts:
+${JSON.stringify(params.existingThoughts, null, 2)}
+`;
 }
 
 function buildSystemInstruction(): string {
@@ -426,6 +529,137 @@ export async function generateCoachMindTurns(params: {
     return {
       mode: "fallback",
       turns: FALLBACK_TURNS
+    };
+  }
+}
+
+export async function generateProblemReviewTurns(params: {
+  latestObservation: ObservationEvent;
+  observations: ObservationEvent[];
+  finalResult: ProblemReviewFinalResult;
+  existingThoughts?: CoachMindTurnOutput[];
+}): Promise<CoachMindResponse> {
+  const config = getDeliberationConfig();
+  const learnerCase = getLearnerCaseByQuestionId(params.latestObservation.question_id);
+
+  if (!hasGeminiConfig(config)) {
+    return {
+      mode: "fallback",
+      turns: FALLBACK_PROBLEM_REVIEW_TURNS
+    };
+  }
+
+  try {
+    const prompt = buildProblemReviewUserPrompt({
+      latestObservation: params.latestObservation,
+      observations: params.observations,
+      currentQuestion: learnerCase
+        ? {
+            exam: learnerCase.exam,
+            theme: learnerCase.theme,
+            questionTitle: learnerCase.questionTitle,
+            questionStem: learnerCase.questionStem,
+            statements: learnerCase.statements
+          }
+        : null,
+      finalResult: params.finalResult,
+      existingThoughts: params.existingThoughts ?? []
+    });
+
+    console.info("[coach-mind][gemini][problem-review] request", {
+      latestObservationId: params.latestObservation.id,
+      observationCount: params.observations.length,
+      promptPreview: truncateForLog(prompt)
+    });
+
+    const response = await fetch(
+      `${GEMINI_API_ROOT}/${encodeURIComponent(config.model)}:generateContent?key=${encodeURIComponent(config.apiKey)}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          systemInstruction: {
+            parts: [
+              {
+                text: buildProblemReviewSystemInstruction()
+              }
+            ]
+          },
+          contents: [
+            {
+              role: "user",
+              parts: [
+                {
+                  text: prompt
+                }
+              ]
+            }
+          ],
+          generationConfig: {
+            temperature: 0.4,
+            responseMimeType: "application/json"
+          }
+        })
+      }
+    );
+
+    if (!response.ok) {
+      const responseBody = await response.text();
+
+      console.error("[coach-mind][gemini][problem-review] non-ok response", {
+        status: response.status,
+        statusText: response.statusText,
+        body: truncateForLog(responseBody)
+      });
+
+      return {
+        mode: "fallback",
+        turns: FALLBACK_PROBLEM_REVIEW_TURNS
+      };
+    }
+
+    const responseBody = await response.text();
+    const payload = JSON.parse(responseBody) as RawGeminiResponse;
+    const text = payload.candidates?.[0]?.content?.parts?.map((part) => part.text ?? "").join("") ?? "";
+
+    console.info("[coach-mind][gemini][problem-review] response", {
+      latestObservationId: params.latestObservation.id,
+      textPreview: truncateForLog(text)
+    });
+
+    if (!text) {
+      return {
+        mode: "fallback",
+        turns: FALLBACK_PROBLEM_REVIEW_TURNS
+      };
+    }
+
+    const parsed = parseJsonBlock(text);
+    const turns = sanitizeTurns(parsed);
+
+    if (!turns) {
+      console.warn("[coach-mind][gemini][problem-review] sanitize failed", {
+        latestObservationId: params.latestObservation.id,
+        rawText: truncateForLog(text)
+      });
+
+      return {
+        mode: "fallback",
+        turns: FALLBACK_PROBLEM_REVIEW_TURNS
+      };
+    }
+
+    return {
+      mode: "ai",
+      turns
+    };
+  } catch (error) {
+    console.error("[coach-mind][gemini][problem-review] request failed", error);
+    return {
+      mode: "fallback",
+      turns: FALLBACK_PROBLEM_REVIEW_TURNS
     };
   }
 }

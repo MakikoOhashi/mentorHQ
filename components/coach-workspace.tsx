@@ -371,6 +371,9 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const [visibleThoughtIds, setVisibleThoughtIds] = useState<string[]>([]);
   const [coachMindTurns, setCoachMindTurns] = useState<CoachMindTurn[]>([]);
   const [coachMindStatus, setCoachMindStatus] = useState<"idle" | "generating" | "error">("idle");
+  const [problemReviewTurns, setProblemReviewTurns] = useState<CoachMindTurn[]>([]);
+  const [problemReviewStatus, setProblemReviewStatus] = useState<"idle" | "generating" | "error">("idle");
+  const [visibleProblemReviewIds, setVisibleProblemReviewIds] = useState<string[]>([]);
   const [reviewConsensusTurns, setReviewConsensusTurns] = useState<ReviewConsensusTurn[]>([]);
   const [visibleReviewConsensusIds, setVisibleReviewConsensusIds] = useState<string[]>([]);
   const [reviewConsensusStatus, setReviewConsensusStatus] = useState<"idle" | "running" | "complete">("idle");
@@ -379,6 +382,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const reviewConsensusTimeoutIdsRef = useRef<number[]>([]);
   const coachMindRevealTimeoutIdsRef = useRef<number[]>([]);
   const coachMindRevealGenerationRef = useRef(0);
+  const problemReviewRevealTimeoutIdsRef = useRef<number[]>([]);
+  const problemReviewRevealGenerationRef = useRef(0);
   const generatedThoughtObservationIdsRef = useRef<Set<string>>(new Set());
   const generatingThoughtObservationIdsRef = useRef<Set<string>>(new Set());
   const failedOptimisticObservationIdsRef = useRef<Set<string>>(new Set());
@@ -422,6 +427,49 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     },
     []
   );
+
+  const clearProblemReviewRevealQueue = useCallback(() => {
+    problemReviewRevealTimeoutIdsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+    problemReviewRevealTimeoutIdsRef.current = [];
+  }, []);
+
+  const bumpProblemReviewRevealGeneration = useCallback(() => {
+    problemReviewRevealGenerationRef.current += 1;
+    clearProblemReviewRevealQueue();
+    return problemReviewRevealGenerationRef.current;
+  }, [clearProblemReviewRevealQueue]);
+
+  const enqueueProblemReviewTurns = useCallback(
+    (turns: CoachMindTurn[], generationId: number) => {
+      if (turns.length === 0) {
+        return;
+      }
+
+      turns.forEach((turn, index) => {
+        const timeoutId = window.setTimeout(() => {
+          if (problemReviewRevealGenerationRef.current !== generationId) {
+            return;
+          }
+
+          setProblemReviewTurns((current) => [...current, turn]);
+
+          if (index === turns.length - 1) {
+            setProblemReviewStatus("idle");
+          }
+        }, index * COACH_MIND_REVEAL_DELAY_MS);
+
+        problemReviewRevealTimeoutIdsRef.current.push(timeoutId);
+      });
+    },
+    []
+  );
+
+  const clearProblemReviewState = useCallback(() => {
+    bumpProblemReviewRevealGeneration();
+    setProblemReviewTurns([]);
+    setProblemReviewStatus("idle");
+    setVisibleProblemReviewIds([]);
+  }, [bumpProblemReviewRevealGeneration]);
 
   const applyDailySessionPayload = useCallback((payload: DailySessionPayload) => {
     setDailySession(payload.session);
@@ -606,6 +654,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
 
   const clearLearnerFlow = useCallback(() => {
     bumpCoachMindRevealGeneration();
+    clearProblemReviewState();
     setDailySession(null);
     setCurrentQuestionId(null);
     setObservations([]);
@@ -625,7 +674,10 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     setQueuedNextPayload(null);
     setCoachMindTurns([]);
     setCoachMindStatus("idle");
+    setProblemReviewTurns([]);
+    setProblemReviewStatus("idle");
     setVisibleThoughtIds([]);
+    setVisibleProblemReviewIds([]);
     setReviewConsensusTurns([]);
     setVisibleReviewConsensusIds([]);
     setReviewConsensusStatus("idle");
@@ -635,7 +687,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     failedOptimisticObservationIdsRef.current = new Set();
     optimisticObservationIdMapRef.current = new Map();
     coachMindTurnsRef.current = [];
-  }, [bumpCoachMindRevealGeneration, initialCase]);
+  }, [bumpCoachMindRevealGeneration, clearProblemReviewState, initialCase]);
 
   useEffect(() => {
     let cancelled = false;
@@ -695,6 +747,10 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     () => coachMindTurns.filter((turn) => visibleThoughtIds.includes(turn.id)),
     [coachMindTurns, visibleThoughtIds]
   );
+  const visibleProblemReviewTurns = useMemo(
+    () => problemReviewTurns.filter((turn) => visibleProblemReviewIds.includes(turn.id)),
+    [problemReviewTurns, visibleProblemReviewIds]
+  );
   const visibleReviewConsensusTurns = useMemo(
     () => reviewConsensusTurns.filter((turn) => visibleReviewConsensusIds.includes(turn.id)),
     [reviewConsensusTurns, visibleReviewConsensusIds]
@@ -703,7 +759,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     sessionActionStatus !== "idle" ||
     reviewActionStatus === "generating" ||
     planActionStatus === "generating" ||
-    coachMindStatus === "generating";
+    coachMindStatus === "generating" ||
+    problemReviewStatus === "generating";
 
   useEffect(() => {
     coachMindTurnsRef.current = coachMindTurns;
@@ -720,9 +777,13 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     if (previousSessionIdRef.current !== nextSessionId) {
       previousSessionIdRef.current = nextSessionId;
       bumpCoachMindRevealGeneration();
+      clearProblemReviewState();
       setCoachMindTurns([]);
       setCoachMindStatus("idle");
+      setProblemReviewTurns([]);
+      setProblemReviewStatus("idle");
       setVisibleThoughtIds([]);
+      setVisibleProblemReviewIds([]);
       setReviewConsensusTurns([]);
       setVisibleReviewConsensusIds([]);
       setReviewConsensusStatus("idle");
@@ -733,7 +794,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       optimisticObservationIdMapRef.current = new Map();
       coachMindTurnsRef.current = [];
     }
-  }, [bumpCoachMindRevealGeneration, dailySession?.id]);
+  }, [bumpCoachMindRevealGeneration, clearProblemReviewState, dailySession?.id]);
 
   useEffect(() => {
     const nextIds = coachMindTurns.map((turn) => turn.id);
@@ -768,6 +829,40 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       revealTimeoutIdsRef.current = [];
     };
   }, [coachMindTurns]);
+
+  useEffect(() => {
+    const nextIds = problemReviewTurns.map((turn) => turn.id);
+
+    setVisibleProblemReviewIds((current) => {
+      const retainedIds = current.filter((id) => nextIds.includes(id));
+      const knownIds = new Set(retainedIds);
+      const appendedIds = nextIds.filter((id) => !knownIds.has(id));
+
+      problemReviewRevealTimeoutIdsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+      problemReviewRevealTimeoutIdsRef.current = [];
+
+      appendedIds.forEach((id, index) => {
+        const timeoutId = window.setTimeout(() => {
+          setVisibleProblemReviewIds((visible) => {
+            if (visible.includes(id)) {
+              return visible;
+            }
+
+            return [...visible, id];
+          });
+        }, index * COACH_MIND_REVEAL_DELAY_MS);
+
+        problemReviewRevealTimeoutIdsRef.current.push(timeoutId);
+      });
+
+      return retainedIds;
+    });
+
+    return () => {
+      problemReviewRevealTimeoutIdsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+      problemReviewRevealTimeoutIdsRef.current = [];
+    };
+  }, [problemReviewTurns]);
 
   useEffect(() => {
     const nextIds = reviewConsensusTurns.map((turn) => turn.id);
@@ -806,8 +901,11 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   useEffect(() => {
     if (observations.length === 0) {
       bumpCoachMindRevealGeneration();
+      clearProblemReviewState();
       setCoachMindTurns([]);
       setCoachMindStatus("idle");
+      setProblemReviewTurns([]);
+      setProblemReviewStatus("idle");
       generatedThoughtObservationIdsRef.current = new Set();
       generatingThoughtObservationIdsRef.current = new Set();
       failedOptimisticObservationIdsRef.current = new Set();
@@ -815,7 +913,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       coachMindTurnsRef.current = [];
       return;
     }
-  }, [bumpCoachMindRevealGeneration, observations.length]);
+  }, [bumpCoachMindRevealGeneration, clearProblemReviewState, observations.length]);
 
   useEffect(() => {
     if (!currentQuestionId || dailySession?.status === "completed") {
@@ -1107,6 +1205,78 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     submittedStatementResult
   ]);
 
+  const generateProblemReviewForFinalAnswer = useCallback(
+    async (nextFinalResult: FinalResult) => {
+      const latestQuestionObservation = currentQuestionObservations.at(-1) ?? null;
+
+      if (!dailySession || !currentQuestionId || !latestQuestionObservation) {
+        return;
+      }
+
+      const generationId = bumpProblemReviewRevealGeneration();
+      setProblemReviewTurns([]);
+      setVisibleProblemReviewIds([]);
+      setProblemReviewStatus("generating");
+      setErrorMessage(null);
+
+      try {
+        const response = await fetch("/api/coach-mind/problem-review", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            latestObservation: latestQuestionObservation,
+            observations: currentQuestionObservations,
+            finalResult: nextFinalResult,
+            existingThoughts: coachMindTurnsRef.current.slice(-8).map((turn) => ({
+              speaker: turn.speaker,
+              speakerLabel: turn.speakerLabel,
+              text: turn.text
+            }))
+          })
+        });
+
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+          throw new Error(payload?.error ?? "Problem review generation failed.");
+        }
+
+        const payload = (await response.json()) as CoachMindResponse;
+        const sourceObservationId = latestQuestionObservation.id;
+        const nextTurns = payload.turns.map((turn, index) => ({
+          ...turn,
+          id: `${sourceObservationId}-problem-review-${index}`,
+          source_observation_id: sourceObservationId
+        })) satisfies CoachMindTurn[];
+
+        if (problemReviewRevealGenerationRef.current !== generationId) {
+          return;
+        }
+
+        enqueueProblemReviewTurns(nextTurns, generationId);
+      } catch (error) {
+        if (problemReviewRevealGenerationRef.current !== generationId) {
+          return;
+        }
+
+        setProblemReviewTurns([]);
+        setVisibleProblemReviewIds([]);
+        setProblemReviewStatus("error");
+        setErrorMessage(error instanceof Error ? error.message : "Unknown error");
+      }
+    },
+    [
+      bumpProblemReviewRevealGeneration,
+      clearProblemReviewState,
+      coachMindTurnsRef,
+      currentQuestionId,
+      currentQuestionObservations,
+      dailySession,
+      enqueueProblemReviewTurns
+    ]
+  );
+
   const submitFinalAnswer = useCallback(async () => {
     if (!dailySession || !learnerCase || !currentQuestionId || !finalChoice) {
       return;
@@ -1131,19 +1301,21 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       }
 
       const payload = (await response.json()) as DailySessionPayload;
-      setFinalResult({
+      const nextFinalResult = {
         selectedIndex: finalChoice,
         correctIndex: learnerCase.correctStatementIndex,
         summary: learnerCase.finalSummary
-      });
+      };
+      setFinalResult(nextFinalResult);
       setQuestionPhase("result");
       setQueuedNextPayload(payload);
+      void generateProblemReviewForFinalAnswer(nextFinalResult);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Unknown error");
     } finally {
       setSessionActionStatus("idle");
     }
-  }, [currentQuestionId, dailySession, finalChoice, learnerCase]);
+  }, [currentQuestionId, dailySession, finalChoice, generateProblemReviewForFinalAnswer, learnerCase]);
 
   const proceedAfterResult = useCallback(() => {
     if (!queuedNextPayload) {
@@ -1151,6 +1323,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     }
 
     applyDailySessionPayload(queuedNextPayload);
+    clearProblemReviewState();
     setQueuedNextPayload(null);
     setFinalResult(null);
     setQuestionPhase("stem");
@@ -1159,7 +1332,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     setIncorrectChatInput("");
     setFinalChoice(null);
     setLearnerStepOverride(null);
-  }, [applyDailySessionPayload, queuedNextPayload]);
+  }, [applyDailySessionPayload, clearProblemReviewState, queuedNextPayload]);
 
   const generateDailyReview = useCallback(async () => {
     if (!dailySession || dailySession.status !== "completed") {
@@ -1269,6 +1442,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
 
   const derivedStep = getCurrentStep(dailySession, tomorrowPlan);
   const currentStep = learnerStepOverride ?? derivedStep;
+  const isFinalProblemReviewActive = questionPhase === "result" && finalResult !== null;
   const isReviewConsensusActive =
     (currentStep === "review" || currentStep === "tomorrow") && reviewConsensusStatus !== "idle";
   const currentStepIndex = STEP_ORDER.indexOf(currentStep);
@@ -1284,8 +1458,16 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const correctChoiceLabel = currentStatement ? getCorrectnessLabel(currentStatement.isCorrect) : "";
   const nextResultLabel =
     queuedNextPayload?.session.status === "completed" ? "今日のふりかえりへ" : "次の問題へ";
-  const displayedThoughtCount = isReviewConsensusActive ? visibleReviewConsensusTurns.length : visibleTurns.length;
-  const displayedThoughtLimit = isReviewConsensusActive ? reviewConsensusTurns.length : coachMindTurns.length || MAX_VISIBLE_THOUGHTS;
+  const displayedThoughtCount = isFinalProblemReviewActive
+    ? visibleProblemReviewTurns.length
+    : isReviewConsensusActive
+    ? visibleReviewConsensusTurns.length
+    : visibleTurns.length;
+  const displayedThoughtLimit = isFinalProblemReviewActive
+    ? problemReviewTurns.length || MAX_VISIBLE_THOUGHTS
+    : isReviewConsensusActive
+    ? reviewConsensusTurns.length
+    : coachMindTurns.length || MAX_VISIBLE_THOUGHTS;
 
   return (
     <main className="demo-viewport">
@@ -1589,8 +1771,13 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                         ))}
                       </div>
                       <div className="reflection-box">{finalResult.summary}</div>
-                      <button className="primary-button phone-button" onClick={proceedAfterResult} type="button">
-                        {nextResultLabel}
+                      <button
+                        className="primary-button phone-button"
+                        onClick={proceedAfterResult}
+                        type="button"
+                        disabled={problemReviewStatus === "generating"}
+                      >
+                        {problemReviewStatus === "generating" ? "レビュー作成中..." : nextResultLabel}
                       </button>
                     </>
                   ) : null}
@@ -1765,9 +1952,17 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
             <div className="panel-heading tight observation-stream-heading">
               <div>
                 <span className="panel-kicker">AI Coach Mind</span>
-                <h3>Live Thought Stream</h3>
+                <h3>
+                  {isFinalProblemReviewActive
+                    ? "Problem Coach Review"
+                    : isReviewConsensusActive
+                    ? "Team Deliberation"
+                    : "Live Thought Stream"}
+                </h3>
                 <p className="device-caption">
-                  {isReviewConsensusActive
+                  {isFinalProblemReviewActive
+                    ? "Final Answer を受けて AI Coach Team がこの問題全体をまとめています。"
+                    : isReviewConsensusActive
                     ? consensusMode === "tomorrow"
                       ? "Daily Review を入力に、AI Coach Team が Tomorrow Plan の総意をまとめています。"
                       : "Observation を受けて AI Coach Team が総意をまとめています。"
@@ -1784,7 +1979,34 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
 
             <div className="observation-stream-viewport">
               <div className="observation-list coach-thought-list">
-                {isReviewConsensusActive ? (
+                {isFinalProblemReviewActive ? visibleProblemReviewTurns.length === 0 ? (
+                  <div className="observation-empty-state">
+                    <p>Thinking...</p>
+                    <p>
+                      {problemReviewStatus === "error"
+                        ? "AI Coach Team の問題全体レビュー生成に失敗しました。もう一度回答を確認してください。"
+                        : problemReviewStatus === "generating"
+                        ? "AI Coach Team がこの問題全体を確認しています。"
+                        : "Final Answer のあとにこの問題全体のレビューが始まります。"}
+                    </p>
+                  </div>
+                ) : (
+                  visibleProblemReviewTurns.map((turn, index) => {
+                    const isLatestThought = index === visibleProblemReviewTurns.length - 1;
+
+                    return (
+                      <section
+                        className={`mind-entry chat-row ${
+                          isLatestThought ? "is-latest-observation" : ""
+                        } stream-depth-${Math.min(visibleProblemReviewTurns.length - 1 - index, 4)}`}
+                        key={turn.id}
+                      >
+                        <p className="mind-log-speaker">{turn.speakerLabel}</p>
+                        <p className="mind-log-line">{turn.text}</p>
+                      </section>
+                    );
+                  })
+                ) : isReviewConsensusActive ? (
                   visibleReviewConsensusTurns.length === 0 ? (
                     <div className="observation-empty-state">
                       <p>Coach Team Deliberation...</p>
