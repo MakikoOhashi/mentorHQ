@@ -12,6 +12,9 @@ export async function POST(request: Request) {
     finalResult?: {
       selectedIndex?: number;
       correctIndex?: number;
+      final_answer?: number;
+      correct_answer?: number;
+      final_answer_correct?: boolean;
       summary?: string;
     };
     existingThoughts?: CoachMindTurnOutput[];
@@ -27,14 +30,26 @@ export async function POST(request: Request) {
   if (
     typeof body.finalResult.selectedIndex !== "number" ||
     typeof body.finalResult.correctIndex !== "number" ||
+    typeof body.finalResult.final_answer !== "number" ||
+    typeof body.finalResult.correct_answer !== "number" ||
+    typeof body.finalResult.final_answer_correct !== "boolean" ||
     typeof body.finalResult.summary !== "string"
   ) {
-    return NextResponse.json({ error: "finalResult must include selectedIndex, correctIndex and summary" }, { status: 400 });
+    return NextResponse.json(
+      {
+        error:
+          "finalResult must include selectedIndex, correctIndex, final_answer, correct_answer, final_answer_correct and summary"
+      },
+      { status: 400 }
+    );
   }
 
   const finalResult = body.finalResult as {
     selectedIndex: number;
     correctIndex: number;
+    final_answer: number;
+    correct_answer: number;
+    final_answer_correct: boolean;
     summary: string;
   };
 
@@ -43,7 +58,10 @@ export async function POST(request: Request) {
     observationCount: body.observations.length,
     existingThoughtCount: body.existingThoughts?.length ?? 0,
     selectedIndex: body.finalResult.selectedIndex,
-    correctIndex: body.finalResult.correctIndex
+    correctIndex: body.finalResult.correctIndex,
+    final_answer: body.finalResult.final_answer,
+    correct_answer: body.finalResult.correct_answer,
+    final_answer_correct: body.finalResult.final_answer_correct
   });
 
   const result = await generateProblemReviewTurns({

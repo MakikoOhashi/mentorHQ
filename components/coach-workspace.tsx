@@ -71,6 +71,9 @@ type ConsensusMode = "review" | "tomorrow";
 type FinalResult = {
   selectedIndex: number;
   correctIndex: number;
+  final_answer: number;
+  correct_answer: number;
+  final_answer_correct: boolean;
   summary: string;
 };
 
@@ -382,8 +385,10 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const reviewConsensusTimeoutIdsRef = useRef<number[]>([]);
   const coachMindRevealTimeoutIdsRef = useRef<number[]>([]);
   const coachMindRevealGenerationRef = useRef(0);
+  const problemReviewTurnQueueTimeoutIdsRef = useRef<number[]>([]);
   const problemReviewRevealTimeoutIdsRef = useRef<number[]>([]);
   const problemReviewRevealGenerationRef = useRef(0);
+  const problemReviewInFlightKeyRef = useRef<string | null>(null);
   const generatedThoughtObservationIdsRef = useRef<Set<string>>(new Set());
   const generatingThoughtObservationIdsRef = useRef<Set<string>>(new Set());
   const failedOptimisticObservationIdsRef = useRef<Set<string>>(new Set());
@@ -429,8 +434,8 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   );
 
   const clearProblemReviewRevealQueue = useCallback(() => {
-    problemReviewRevealTimeoutIdsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
-    problemReviewRevealTimeoutIdsRef.current = [];
+    problemReviewTurnQueueTimeoutIdsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+    problemReviewTurnQueueTimeoutIdsRef.current = [];
   }, []);
 
   const bumpProblemReviewRevealGeneration = useCallback(() => {
@@ -442,6 +447,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const enqueueProblemReviewTurns = useCallback(
     (turns: CoachMindTurn[], generationId: number) => {
       if (turns.length === 0) {
+        setProblemReviewStatus("idle");
         return;
       }
 
@@ -454,11 +460,12 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
           setProblemReviewTurns((current) => [...current, turn]);
 
           if (index === turns.length - 1) {
+            problemReviewTurnQueueTimeoutIdsRef.current = [];
             setProblemReviewStatus("idle");
           }
         }, index * COACH_MIND_REVEAL_DELAY_MS);
 
-        problemReviewRevealTimeoutIdsRef.current.push(timeoutId);
+        problemReviewTurnQueueTimeoutIdsRef.current.push(timeoutId);
       });
     },
     []
@@ -466,6 +473,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
 
   const clearProblemReviewState = useCallback(() => {
     bumpProblemReviewRevealGeneration();
+    problemReviewInFlightKeyRef.current = null;
     setProblemReviewTurns([]);
     setProblemReviewStatus("idle");
     setVisibleProblemReviewIds([]);
@@ -1213,6 +1221,20 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
         return;
       }
 
+      const problemReviewRequestKey = [
+        dailySession.id,
+        currentQuestionId,
+        nextFinalResult.final_answer,
+        nextFinalResult.correct_answer,
+        nextFinalResult.final_answer_correct
+      ].join(":");
+
+      if (problemReviewInFlightKeyRef.current === problemReviewRequestKey) {
+        return;
+      }
+
+      problemReviewInFlightKeyRef.current = problemReviewRequestKey;
+
       const generationId = bumpProblemReviewRevealGeneration();
       setProblemReviewTurns([]);
       setVisibleProblemReviewIds([]);
@@ -1255,7 +1277,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
         }
 
         enqueueProblemReviewTurns(nextTurns, generationId);
-      } catch (error) {
+      } catch {
         if (problemReviewRevealGenerationRef.current !== generationId) {
           return;
         }
@@ -1263,7 +1285,11 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
         setProblemReviewTurns([]);
         setVisibleProblemReviewIds([]);
         setProblemReviewStatus("error");
-        setErrorMessage(error instanceof Error ? error.message : "Unknown error");
+        setErrorMessage("レビュー生成に失敗しました。もう一度試してください。");
+      } finally {
+        if (problemReviewInFlightKeyRef.current === problemReviewRequestKey) {
+          problemReviewInFlightKeyRef.current = null;
+        }
       }
     },
     [
@@ -1304,6 +1330,9 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       const nextFinalResult = {
         selectedIndex: finalChoice,
         correctIndex: learnerCase.correctStatementIndex,
+        final_answer: finalChoice,
+        correct_answer: learnerCase.correctStatementIndex,
+        final_answer_correct: finalChoice === learnerCase.correctStatementIndex,
         summary: learnerCase.finalSummary
       };
       setFinalResult(nextFinalResult);
@@ -1984,7 +2013,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                     <p>Thinking...</p>
                     <p>
                       {problemReviewStatus === "error"
-                        ? "AI Coach Team の問題全体レビュー生成に失敗しました。もう一度回答を確認してください。"
+                        ? "レビュー生成に失敗しました。もう一度試してください。"
                         : problemReviewStatus === "generating"
                         ? "AI Coach Team がこの問題全体を確認しています。"
                         : "Final Answer のあとにこの問題全体のレビューが始まります。"}

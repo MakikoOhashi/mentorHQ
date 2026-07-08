@@ -44,6 +44,9 @@ const FALLBACK_PROBLEM_REVIEW_TURNS: CoachMindTurnOutput[] = [
 type ProblemReviewFinalResult = {
   selectedIndex: number;
   correctIndex: number;
+  final_answer: number;
+  correct_answer: number;
+  final_answer_correct: boolean;
   summary: string;
 };
 
@@ -118,6 +121,10 @@ function buildProblemReviewSystemInstruction(): string {
     "問題の正答率や点数の話に寄せない。何を理解しているかを中心に書く。",
     "Observation に存在しない事実は書かない。",
     "観測されていないことは推測しない。",
+    "final_answer_correct は最終回答の正誤を示す最優先の事実です。",
+    "最終正誤を Observation から推測してはいけません。",
+    "質問したことと最終正誤を結び付けてはいけません。",
+    "final_answer_correct が true の場合、『全体を誤答した』『最終的に誤答した』『最終回答を誤答した』とは絶対に書かない。",
     "Reading はこの問題全体で実際に起きたことを一言でまとめる。",
     "Memory は各肢 Observation の差分を比較する。正誤の回数ではなく、理解の変化を見る。",
     "Pattern は問題テーマから一段抽象化して、学習者モデルの仮説を書く。",
@@ -175,6 +182,12 @@ function buildProblemReviewUserPrompt(params: {
 - Review は次に別テーマで何を確かめたいかだけを短く置く
 - Observation に存在しない事実は作らない
 - 観測されていないことは推測しない
+- finalResult.final_answer は学習者の最終回答
+- finalResult.correct_answer は正解
+- finalResult.final_answer_correct は最終回答の正誤を示す最優先の事実
+- 最終正誤を observations から推測しない
+- 質問したことと最終正誤を結び付けない
+- finalResult.final_answer_correct === true の場合、「全体を誤答した」「最終的に誤答した」「最終回答を誤答した」と絶対に書かない
 - finalResult は最終回答の結果を示すが、成績分析には使わない
 - Observation が少ない場合は断定しない
 - これは 1 問の Coach Review であり、Daily Review でも Tomorrow Plan でもない
@@ -196,6 +209,40 @@ ${JSON.stringify(observations, null, 2)}
 existingThoughts:
 ${JSON.stringify(params.existingThoughts, null, 2)}
 `;
+}
+
+function enforceProblemReviewFinalResult(
+  turns: CoachMindTurnOutput[],
+  finalResult: ProblemReviewFinalResult
+): CoachMindTurnOutput[] {
+  if (!finalResult.final_answer_correct) {
+    return turns;
+  }
+
+  return turns.map((turn) => {
+    const contradictsFinalCorrectness =
+      /全体を誤答|最終的に誤答|最終回答を誤答|最終回答.*誤答|誤答した/.test(turn.text);
+
+    if (!contradictsFinalCorrectness) {
+      return turn;
+    }
+
+    if (turn.speaker === "reading") {
+      return {
+        ...turn,
+        text: "この問題では、肢ごとの確認を経て最終回答は正答だった。"
+      };
+    }
+
+    return {
+      ...turn,
+      text: turn.text
+        .replace(/全体を誤答した/g, "最終回答は正答だった")
+        .replace(/最終的に誤答した/g, "最終回答は正答だった")
+        .replace(/最終回答を誤答した/g, "最終回答は正答だった")
+        .replace(/誤答した/g, "正答だった")
+    };
+  });
 }
 
 function buildSystemInstruction(): string {
@@ -653,7 +700,7 @@ export async function generateProblemReviewTurns(params: {
 
     return {
       mode: "ai",
-      turns
+      turns: enforceProblemReviewFinalResult(turns, params.finalResult)
     };
   } catch (error) {
     console.error("[coach-mind][gemini][problem-review] request failed", error);
