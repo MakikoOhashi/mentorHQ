@@ -359,6 +359,16 @@ FIRESTORE_PROJECT_ID=your_project_id
 
 Firestore uses Google Application Default Credentials through Firebase Admin. If Firestore credentials are unavailable, MentorHQ falls back to in-memory and `/tmp` storage.
 
+## Future Vision
+
+MentorHQ の将来的な目標は、単に問題演習を支援することではなく、学習者の生活や状態まで含めて学習を最適化する Learning OS へ発展することです。
+
+今後は、管理業務主任者試験以外の資格試験、受験、社内学習にも対応できる設計を目指します。試験日までの残り時間、進捗、理解度をもとに、必要な単元や復習優先度を調整し、合格見込みやリスクも学習者を追い込みすぎない距離感で伝える構想です。
+
+さらに、カレンダーやスケジュールアプリと連携して仕事、家庭、学校の忙しさを推定したり、Fit 系ガジェットやヘルスデータから睡眠、疲労、体調を参考にしたりすることで、その日の状態に合った Tomorrow Plan や声かけを生成できるようにしたいと考えています。
+
+モチベーションが落ちたときには、これまでの Observation をもとに話を聞き、叱咤ではなく状況を理解したうえで、再開しやすい一歩を一緒に探す `mentor mode` も構想しています。
+
 ## Current Limitations
 
 - Login and multi-learner management are not implemented.
