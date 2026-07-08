@@ -1,190 +1,205 @@
 # MentorHQ
 
-MentorHQ は、Observation を中心に設計された AI Learning Architecture です。  
-学習者とのやり取りを `Observation Event` として保存し、その保存済み Observation を Firestore から読み直して、AI の思考を毎回再生成します。
+一人で学習を続ける中で、
 
-## Architecture
+「自分のことを理解してくれるマンツーマンメンターがいたら。」
 
-```mermaid
-graph TD
-A[Learner]
-B[Observation Event]
-C[(Firestore)]
-D[AI Coach Mind]
-E[Daily Review]
-F[Tomorrow Plan]
-A --> B
-B --> C
-C --> D
-C --> E
-E --> F
-C --> F
-```
+そう思ったことはありませんか？
 
-### 全体の流れ
+昨日はどこで迷ったのか。
 
-1. 学習者が肢ごとに回答する
-2. そのやり取りを `Observation Event` に変換する
-3. Observation を Firestore に保存する
-4. AI Coach Mind が保存済み Observation を読み、`Reading` `Memory` `Pattern` `Review` を生成する
-5. Daily Review が Observation と Session Memory を読んで日次レビューを生成する
-6. Tomorrow Plan が Daily Review と Observation と Session Memory を読んで翌日の計画を生成する
+何が理解できていて、何が苦手なのか。
 
-### 何を永続化するか
+そんなことまで理解したうえで、今日の学習、明日の学習まで導いてくれる存在。
 
-- 学習進捗の中核となる永続データは `observation_events`
-- `daily_reviews` と `tomorrow_plans` は生成結果として保存する
-- Live Thought Stream 自体は保存しない
-- AI の発話は資産として保持せず、保存済み Observation から毎回再生成する
+MentorHQ は、答えを教える AI ではありません。
 
-## Observation First Design
+Observation を積み重ね、学習者モデルを育てながら、あなたに合った学習へ導く Learning OS です。
 
-MentorHQ は次の分離を採用しています。
+## What It Does
+
+MentorHQ は、管理業務主任者試験の四択問題を題材にした学習体験です。
+
+学習者は 1 問をいきなり解説されるのではなく、肢ごとに判断します。その判断は `Observation Event` として保存され、AI Coach Team が学習者の読み方、迷い方、理解の進み方を短い内部会話として更新します。
+
+主な流れは次のとおりです。
+
+1. 今日のセッションを開始する
+2. 問題文を確認する
+3. 肢ごとに `正しい / 誤り` を判断する
+4. 判断結果を `Observation Event` として保存する
+5. 回答直後に AI Coach Mind が `Reading` `Memory` `Pattern` `Review` を生成する
+6. 不正解時は短い追加質問で理解を補助する
+7. 4 肢の確認後に Final Answer を出す
+8. Final Answer 後に 1 問全体の `Problem Coach Review` を生成する
+9. 3 問完了後に `Daily Review` を生成する
+10. Daily Review から `Tomorrow Plan` を生成する
+
+## Core Idea
+
+MentorHQ の中心は `Observation First` です。
 
 - `Observation = Fact`
 - `AI Coach Mind = Hypothesis`
 
-保存するのは学習者側の観測事実です。たとえば:
+保存するのは、学習者に実際に起きた観測事実です。
 
 - どの肢をどう判断したか
 - 正誤
-- 実際に存在した学習者質問
-- その他の観測済みセッション事実
+- reasoning style
+- misunderstanding type
+- 実際に発生した追加質問
+- Final Answer の結果
 
-保存しないのは AI の思考です。たとえば:
+一方で、AI の思考ログそのものは永続保存しません。
 
 - `Reading`
 - `Memory`
 - `Pattern`
 - `Review`
+- Problem-level Coach Review の turns
 
-これらは保存済み Observation を元に、Gemini がその都度再生成します。
+これらは React state 上で表示されるランタイム生成物です。Firestore の主な役割は、あとから再利用できる Fact source として Observation を保存することです。
 
-### なぜこの設計なのか
+## Learning Flow
 
-- モデル改善をそのまま新しい Thought に反映できる
-- プロンプト改善をそのまま新しい Thought に反映できる
-- AI の発言を資産化しない
-- 長期的に価値が残る Fact を資産化する
+### Statement Observation
 
-要するに、MentorHQ は
+各肢の回答は `Observation Event` に変換されます。
 
-- Fact を保存する
-- Thought は再生成する
+主に保存する情報は次のとおりです。
 
-という設計を採用しています。
-
-## AI Design
-
-### AI Coach Mind
-
-AI Coach Mind は、Observation 履歴を読んで 4 つの短い内部思考を生成するランタイム層です。
-
-- `Reading`: 今回何が起きたか
-- `Memory`: 前回から何が変わったか
-- `Pattern`: この人はどう学ぶタイプか
-- `Review`: 今日何を持ち帰るか
-
-これらの turn は `/api/coach-mind` を通じて Gemini で生成されます。
-
-現在の実装では、次の制約を強くかけています。
-
-- 観測されていない absence を evidence として扱わない
-- チャットが渡されていないことを「質問しなかった」と言わない
-- 理由入力が無いことを「理由がなかった」と言わない
-- `Pattern` は学習者モデルだけを更新し、現在の法領域や条文や肢そのものは分析しない
-
-### Live Thought Stream
-
-Live Thought Stream は Firestore に保存しません。
-
-現在の実装フローは次のとおりです。
-
-1. React が `/api/daily-session/latest` から最新の daily session を取得する
-2. その API が Firestore から `observation_events` を読み込む
-3. React がその Observation を `observations` state に同期する
-4. 各 Observation ごとにクライアントが `/api/coach-mind` を呼ぶ
-5. Gemini が `Reading` `Memory` `Pattern` `Review` を再生成する
-
-つまり Live Thought Stream はキャッシュではなく再生成です。
-
-ページを再読み込みした場合も:
-
-- Observation は Firestore から再取得できる
-- Thought はその Observation を元に再計算される
-- 以前の Thought 文面そのものは DB から復元しない
-
-## Data Flow
-
-### Learner から Observation へ
-
-学習者は statement 単位で回答します。  
-そのやり取りは `Observation Event` に変換され、主に次の情報を持ちます。
-
+- `daily_session_id`
 - `question_id`
 - `question_index`
 - `statement_index`
 - `learner_choice`
 - `correct_or_wrong`
+- `reasoning_style`
+- `misunderstanding_type`
+- `answer_signal_score`
 - `observation_note`
 - `note`
 
-不正解後チャットが存在する場合は、その transcript が `note` に観測事実として保存され、後から AI Coach Mind が読むことができます。
+不正解後の追加チャットがある場合は、実際のやり取りを `note` に保存します。チャットが存在しないことを「質問しなかった」とは扱いません。
 
-### Observation から Live Thought Stream へ
+### AI Coach Mind
 
-`/api/coach-mind` 自体は Firestore を直接読んでいません。  
-この API はクライアントから次を受け取ります。
+肢ごとの回答直後、クライアントは optimistic observation を使って `/api/coach-mind` を呼びます。
+
+Firestore 保存完了や再読み込みを待たず、右側の Live Thought Stream がすぐに動き始めます。これは回答直後の UX を優先するためです。
+
+`/api/coach-mind` は次を受け取ります。
 
 - `latestObservation`
 - `recentObservations`
 - `existingThoughts`
 
-これらは React state 由来ですが、その state 自体は Firestore から読み込まれた `observation_events` を含む API レスポンスで hydrate されています。
+AI Coach Mind は Gemini で 4 turns を生成します。
 
-### Observation から Daily Review へ
+- `Reading`: 今回の observation で実際に起きたことを見る
+- `Memory`: 近い observation と比較する
+- `Pattern`: 学習者モデルの仮説を慎重に更新する
+- `Review`: 次に観察したいことを短く置く
 
-Daily Review の生成では次を読みます。
+表示は batch API の結果を React 側で段階的に reveal します。SSE や streaming API は使っていません。
+
+### Problem Coach Review
+
+Final Answer 後には、1 問全体の `Problem Coach Review` を生成します。
+
+これは Daily Review ではありません。対象はその 1 問だけです。
+
+`/api/coach-mind/problem-review` は次を受け取ります。
+
+- その問題の Observation 全体
+- latest observation
+- Final Answer の結果
+- 直近の Coach Mind turns
+
+生成される turns は通常の Coach Mind と同じく `Reading` `Memory` `Pattern` `Review` です。
+
+- `Reading`: 4 肢全体で実際に起きたこと
+- `Memory`: 各肢 Observation の比較
+- `Pattern`: 問題テーマ全体から見た理解モデル
+- `Review`: 次に別テーマで確かめたいこと
+
+Pattern は正答率の言い換えではなく、「何を理解し始めているか」を扱います。
+
+### Daily Review
+
+Daily Review は、1 日のセッション完了後に生成されます。
+
+入力は主に次の情報です。
 
 - `observation_events`
 - `sessions` 由来の memory summary
+- daily session metadata
 
-そのうえで Daily Review を生成し、保存するのは生成結果だけです。
+Daily Review は Gemini で生成し、生成結果を `daily_reviews` に保存します。
 
-### Observation から Tomorrow Plan へ
+保存する内容は次のとおりです。
 
-Tomorrow Plan の生成では次を読みます。
+- `summary`
+- `key_observations`
+- `repeated_patterns`
+- `coach_comment`
+
+### Tomorrow Plan
+
+Tomorrow Plan は Daily Review 生成後に作成できます。
+
+入力は主に次の情報です。
 
 - `daily_reviews`
 - `observation_events`
 - `sessions` 由来の memory summary
 
-そのうえで Tomorrow Plan を生成し、保存するのは生成結果だけです。
+Tomorrow Plan は Gemini で生成し、生成結果を `tomorrow_plans` に保存します。
 
-## Firestore
+保存する内容は次のとおりです。
 
-現在の実装では、次のコレクションを使用しています。
+- `focus_theme`
+- `practice_items`
+- `caution_points`
+- `coach_message`
 
-### `sessions`
+## Architecture
 
-deliberation レベルの Session Memory を保存します。
+```mermaid
+graph TD
+  A[Learner]
+  B[Statement Answer]
+  C[Observation Event]
+  D[(Firestore)]
+  E[AI Coach Mind]
+  F[Problem Coach Review]
+  G[Daily Review]
+  H[Tomorrow Plan]
 
-主な内容:
+  A --> B
+  B --> C
+  C --> D
+  C --> E
+  C --> F
+  D --> G
+  G --> H
+  D --> H
+```
 
-- `learnerCase`
-- `deliberation_events`
-- `coach_decision`
-- `misunderstanding_type`
-- `mode`
-- `created_at`
+Firestore は学習事実の SSOT です。
 
-これは memory context や repeated-pattern summary の元データとして使われます。
+ただし、右側に表示される AI Coach Mind は回答直後の optimistic observation から生成されます。Firestore 保存完了後に Observation は保存済み ID と同期されますが、Thought 自体は永続保存しません。
 
-### `daily_sessions`
+## Data Storage
 
-1 日の学習セッション本体を保存します。
+### Firestore Collections
 
-主な内容:
+現在の実装で使用している主なコレクションです。
+
+#### `daily_sessions`
+
+1 日の学習セッション本体です。
 
 - `question_ids`
 - `current_index`
@@ -194,11 +209,9 @@ deliberation レベルの Session Memory を保存します。
 - `tomorrow_plan_status`
 - `created_at`
 
-### `observation_events`
+#### `observation_events`
 
-学習者進捗の観測事実を保存します。
-
-主な内容:
+MentorHQ の中心となる Fact source です。
 
 - `daily_session_id`
 - `question_id`
@@ -215,13 +228,9 @@ deliberation レベルの Session Memory を保存します。
 - `note`
 - `created_at`
 
-このコレクションが Live Thought Stream、Daily Review、Tomorrow Plan の主要な Fact source です。
+#### `daily_reviews`
 
-### `daily_reviews`
-
-生成済み Daily Review を保存します。
-
-主な内容:
+生成済み Daily Review です。
 
 - `daily_session_id`
 - `summary`
@@ -230,11 +239,9 @@ deliberation レベルの Session Memory を保存します。
 - `coach_comment`
 - `created_at`
 
-### `tomorrow_plans`
+#### `tomorrow_plans`
 
-生成済み Tomorrow Plan を保存します。
-
-主な内容:
+生成済み Tomorrow Plan です。
 
 - `daily_session_id`
 - `daily_review_id`
@@ -244,78 +251,95 @@ deliberation レベルの Session Memory を保存します。
 - `coach_message`
 - `created_at`
 
-## Storage Model
+#### `sessions`
 
-### Firestore
+旧 deliberation 経路の session memory として残っています。
 
-本番系の永続保存先です。
+- `learnerCase`
+- `deliberation_events`
+- `coach_decision`
+- `misunderstanding_type`
+- `mode`
+- `created_at`
 
-- `sessions`
-- `daily_sessions`
-- `observation_events`
-- `daily_reviews`
-- `tomorrow_plans`
+現行の daily practice の主経路は `daily_sessions` と `observation_events` です。
 
 ### React Local State
 
-画面表示とランタイム制御のためにだけ使います。
-
-例:
+画面表示とランタイム制御に使います。
 
 - `observations`
 - `latestObservation`
 - `coachMindTurns`
+- `problemReviewTurns`
 - `dailyReview`
 - `tomorrowPlan`
 
 これは永続保存ではありません。
 
-### localStorage
-
-現在の実装では使っていません。
-
-### sessionStorage
-
-現在の実装では使っていません。
-
 ### Fallback Storage
 
-Firestore が使えない場合、サーバー側では次にフォールバックします。
+Firestore credential が無い場合、サーバー側では in-memory map と `/tmp` 配下の JSON にフォールバックします。
 
-- in-memory maps
-- `/tmp` 配下の JSON ファイル
-
-現在の fallback file:
+Fallback file:
 
 - `mentorhq-daily-sessions.json`
 - `mentorhq-observation-events.json`
 - `mentorhq-daily-reviews.json`
 - `mentorhq-tomorrow-plans.json`
 
-## 何を保存し、何を再計算するか
+この fallback は開発・デモ用です。永続性は Firestore より弱く、実行環境の再起動や `/tmp` の扱いに依存します。
 
-### 保存するもの
+## API Surface
 
-- Observation
-- daily session metadata
-- deliberation session memory
-- generated daily reviews
-- generated tomorrow plans
+### Current APIs
 
-### 再計算するもの
+- `POST /api/daily-session/start`
+  - 今日の daily session を開始します。
 
-- Live Thought Stream
-- `Reading`
-- `Memory`
-- `Pattern`
-- `Review`
+- `GET /api/daily-session/latest`
+  - 最新の daily session と Observation を取得します。
 
-これが MentorHQ の中核設計です。
+- `POST /api/daily-session/observation`
+  - statement 単位の Observation を保存します。
 
-- Fact は保存する
-- Thought は再生成する
+- `POST /api/daily-session/advance`
+  - Final Answer 後に次の問題へ進めます。
 
-## Run
+- `POST /api/coach-mind`
+  - 直近の Observation から肢ごとの AI Coach Mind を生成します。
+
+- `POST /api/coach-mind/problem-review`
+  - Final Answer 後に 1 問全体の Problem Coach Review を生成します。
+
+- `POST /api/learner-chat`
+  - 不正解後の短い追加チャットを生成します。
+
+- `POST /api/daily-session/review`
+  - セッション完了後に Daily Review を生成します。
+
+- `POST /api/daily-session/tomorrow-plan`
+  - Daily Review から Tomorrow Plan を生成します。
+
+### Legacy / Experimental APIs
+
+- `POST /api/deliberate`
+  - 旧 Coach Decision / deliberation 実験用の経路です。
+  - 現在の daily practice UI の主経路ではありません。
+
+- `GET /api/sessions/latest`
+  - 旧 session memory 参照用の補助 API です。
+
+## Tech Stack
+
+- Next.js 15
+- React 19
+- TypeScript
+- Firebase Admin SDK / Firestore
+- Gemini API
+- Server-side fallback storage with in-memory maps and `/tmp` JSON files
+
+## Run Locally
 
 ```bash
 npm install
@@ -323,6 +347,45 @@ cp .env.example .env.local
 npm run dev
 ```
 
-[http://localhost:3000](http://localhost:3000) を開いてください。
+Open [http://localhost:3000](http://localhost:3000).
 
-Firestore credential が無い場合は、アプリは in-memory と `/tmp` ストレージにフォールバックします。
+`.env.local` can include:
+
+```bash
+GEMINI_API_KEY=your_api_key
+GEMINI_MODEL=gemini-2.5-flash
+FIRESTORE_PROJECT_ID=your_project_id
+```
+
+Firestore uses Google Application Default Credentials through Firebase Admin. If Firestore credentials are unavailable, MentorHQ falls back to in-memory and `/tmp` storage.
+
+## Current Limitations
+
+- Login and multi-learner management are not implemented.
+- There is no full question database. The demo uses built-in practice questions.
+- Right-side Coach Mind turns are not persisted.
+- Reloading the page hydrates session and Observation data, but it does not guarantee full restoration of the previous right-side Thought Stream text.
+- The long-term learner model is not yet based on all historical Firestore Observation records across learners or days.
+- Problem Coach Review is generated for the current problem only. It is separate from Daily Review.
+- `docs/` still contains earlier Coach Decision / agent_report design notes and should be treated as design history, not as a perfect description of the current app.
+- `/api/deliberate` and the older deliberation modules remain as legacy / experimental code paths.
+
+## What Is Intentionally Not Stored
+
+MentorHQ does not treat AI thought text as the durable learning asset.
+
+Stored:
+
+- Observation events
+- Daily session metadata
+- Generated Daily Review
+- Generated Tomorrow Plan
+- Legacy deliberation session memory
+
+Not stored:
+
+- Live Thought Stream turns
+- Problem Coach Review turns
+- Temporary React UI state
+
+The durable asset is the learner's observed behavior. The AI interpretation can improve as prompts and models improve.
