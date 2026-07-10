@@ -17,6 +17,17 @@ type RawGeminiResponse = {
 
 type DailyReviewOutput = Omit<DailyReviewInput, "daily_session_id">;
 
+const LEARNER_CHAT_ABSENCE_RULES = [
+  "Do NOT infer learner characteristics from the absence of learner chat.",
+  "Learner chat is only available after incorrect answers.",
+  "Therefore:",
+  "- Never compare \"chat vs no chat\".",
+  "- Never mention \"chat information was not provided.\"",
+  "- Never treat the absence of chat as learner behavior.",
+  "- Never use \"question frequency\" unless the learner actually opened learner chat.",
+  "Only discuss learner chat when an actual learner chat event exists."
+].join("\n");
+
 function truncateForLog(value: string, maxLength = 1000): string {
   return value.length > maxLength ? `${value.slice(0, maxLength)}…[truncated]` : value;
 }
@@ -302,6 +313,9 @@ function buildSystemInstruction(): string {
     "repeated_patterns は明日につながる観点として短く返す。",
     "問題情報や explanation は文脈理解のためだけに使い、説明の要約をそのまま出力しない。",
     "誤答後チャットがある場合は、理解が動いたポイントだけを要約して反映する。",
+    LEARNER_CHAT_ABSENCE_RULES,
+    "Review では、『チャット有無』『質問有無』を比較対象にしない。",
+    "Review の比較対象は Observation / reasoning style / misunderstanding / statement judgment / theme understanding のみ。",
     "Observation にない内容を断定しない。",
     "出力は JSON のみ。Markdown やコードフェンスは禁止。"
   ].join("\n");
@@ -406,6 +420,9 @@ AI Coach Team 全体の consensus として返してください。
 - 問題情報と explanation は、学びの整理に必要な範囲だけ使う
 - explanation をそのまま要約して出さない
 - 誤答後チャットがある場合は、理解が動いたポイントだけ反映する
+- ${LEARNER_CHAT_ABSENCE_RULES}
+- 「チャット有無」「質問有無」を比較対象にしない
+- 比較対象は Observation / reasoning style / misunderstanding / statement judgment / theme understanding のみ
 - 同じ内容を繰り返さない
 - 固定文言ではなく、与えられたデータに応じた内容にする
 

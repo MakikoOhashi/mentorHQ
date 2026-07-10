@@ -41,6 +41,23 @@ const FALLBACK_PROBLEM_REVIEW_TURNS: CoachMindTurnOutput[] = [
   { speaker: "review", speakerLabel: "Review", text: "別テーマでも同じ整理ができるか見たい。" }
 ];
 
+const LEARNER_CHAT_ABSENCE_RULES = [
+  "Do NOT infer learner characteristics from the absence of learner chat.",
+  "Learner chat is only available after incorrect answers.",
+  "Therefore:",
+  "- Never compare \"chat vs no chat\".",
+  "- Never mention \"chat information was not provided.\"",
+  "- Never treat the absence of chat as learner behavior.",
+  "- Never use \"question frequency\" unless the learner actually opened learner chat.",
+  "Only discuss learner chat when an actual learner chat event exists."
+].join("\n");
+
+const COACH_TURN_COMPARISON_SCOPE_RULES = [
+  "Memory / Pattern / Review では、『チャット有無』『質問有無』を比較対象にしない。",
+  "Memory / Pattern / Review の比較対象は Observation / reasoning style / misunderstanding / statement judgment / theme understanding のみ。",
+  "learner chat event が実際に存在する場合だけ、その内容を観測事実として扱ってよい。ただし chat の有無や質問の有無を学習者特徴にしない。"
+].join("\n");
+
 type ProblemReviewFinalResult = {
   selectedIndex: number;
   correctIndex: number;
@@ -124,6 +141,8 @@ function buildProblemReviewSystemInstruction(): string {
     "final_answer_correct は最終回答の正誤を示す最優先の事実です。",
     "最終正誤を Observation から推測してはいけません。",
     "質問したことと最終正誤を結び付けてはいけません。",
+    LEARNER_CHAT_ABSENCE_RULES,
+    COACH_TURN_COMPARISON_SCOPE_RULES,
     "final_answer_correct が true の場合、『全体を誤答した』『最終的に誤答した』『最終回答を誤答した』とは絶対に書かない。",
     "Reading はこの問題全体で実際に起きたことを一言でまとめる。",
     "Memory は各肢 Observation の差分を比較する。正誤の回数ではなく、理解の変化を見る。",
@@ -187,6 +206,8 @@ function buildProblemReviewUserPrompt(params: {
 - finalResult.final_answer_correct は最終回答の正誤を示す最優先の事実
 - 最終正誤を observations から推測しない
 - 質問したことと最終正誤を結び付けない
+- ${LEARNER_CHAT_ABSENCE_RULES}
+- ${COACH_TURN_COMPARISON_SCOPE_RULES}
 - finalResult.final_answer_correct === true の場合、「全体を誤答した」「最終的に誤答した」「最終回答を誤答した」と絶対に書かない
 - finalResult は最終回答の結果を示すが、成績分析には使わない
 - Observation が少ない場合は断定しない
@@ -264,6 +285,7 @@ function buildSystemInstruction(): string {
     "観測できるのは、選択結果と、その後に学習者が任意で質問した内容だけです。",
     "質問情報が渡されていない場合、それは『質問がなかった』ことを意味しません。単に観測対象外です。",
     "質問情報が実際に渡されている場合だけ、用語を質問している、条文を聞いている、などと言ってよいです。",
+    LEARNER_CHAT_ABSENCE_RULES,
     "answer_signal_score は内部観測用の補助スコアです。学習者の自信や不安を表す値ではありません。",
     "answer_signal_score だけを根拠に『自信が低い』『不安そう』『偶然正解した』などと言ってはいけません。",
     "Reading は今回だけ見る。",
@@ -273,6 +295,7 @@ function buildSystemInstruction(): string {
     "Memory の比較は最大 1 件まで。複数の差分を並べない。",
     "Memory は Observation に存在しない事実を書かない。",
     "Memory は比較対象が無い場合、比較を書かない。",
+    COACH_TURN_COMPARISON_SCOPE_RULES,
     "Pattern は Reading と Memory を受けて、学習者の学び方や理解の進め方を少しだけ更新する。",
     "Pattern は現在の問題や条文や肢を分析しない。学習者モデルだけを話す。",
     "Pattern は observation が 3 件未満なら強い傾向を述べない。判断は保留し、仮説段階にとどめる。",
@@ -329,9 +352,10 @@ ${JSON.stringify(learnerChatHistory, null, 2)}`
 - 反応は短くてよい: 「たしかに。」「それなら。」「一旦保留。」
 - Reading は latestObservation を中心に書く
 - learnerChatHistory が実際に渡されている場合だけ、Reading でチャット内容に触れてよい
+- ${LEARNER_CHAT_ABSENCE_RULES}
 - Memory は recentObservations と Reading の発言を受けて書く
 - Memory は比較できる observation がある場合だけ比較する
-- Memory は実際に渡されたチャット情報がある observation 同士だけでチャット比較をしてよい
+- ${COACH_TURN_COMPARISON_SCOPE_RULES}
 - Memory は「前回と同じ」ではなく、前回から何が変わったかを優先して書く
 - 比較対象が弱いときの Memory は「まだ比較材料は少ない。」だけでよい
 - Memory は内部番号を使わない。Q1 / Q2 / 問題番号は書かない
@@ -353,7 +377,7 @@ ${JSON.stringify(learnerChatHistory, null, 2)}`
 - Pattern は観測根拠があるときだけ、学習者の学び方について最小限の仮説を書く
 - Pattern は問題そのものを分析しない
 - Pattern は「この問題では〜」「この条文では〜」「相続放棄の〜」「民法915条が〜」のように問題内容を説明しない
-- Pattern は学習者を対象にして、「条件を見比べながら理解するタイプかも」「質問しながら理解を進めるタイプかも」「用語を確認してから納得したいタイプかも」程度で止める
+- Pattern は学習者を対象にして、「条件を見比べながら理解するタイプかも」「判断基準を確認してから納得したいタイプかも」程度で止める
 - Pattern は「〜かも」「まだ分からない」まで。断定しない
 - Pattern は相続、設備、会計、英語に置き換えても成立する内容にする
 - Review は断定しない
