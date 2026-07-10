@@ -43,7 +43,7 @@ const FALLBACK_PROBLEM_REVIEW_TURNS: CoachMindTurnOutput[] = [
 
 const LEARNER_CHAT_ABSENCE_RULES = [
   "Do NOT infer learner characteristics from the absence of learner chat.",
-  "Learner chat is only available after incorrect answers.",
+  "Learner chat is optional and may be available after correct or incorrect answers.",
   "Therefore:",
   "- Never compare \"chat vs no chat\".",
   "- Never mention \"chat information was not provided.\"",

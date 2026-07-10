@@ -50,6 +50,7 @@ type QuestionPhase = "stem" | "statement" | "statement-result" | "final" | "resu
 type CorrectQuickFeedback = {
   mode: "correct";
   point: string;
+  messages?: Array<{ id: string; role: "learner" | "coach"; text: string }>;
 };
 
 type IncorrectConversation = {
@@ -277,7 +278,8 @@ function buildImmediateCoaching(
   if (isRight) {
     return {
       mode: "correct",
-      point: buildPointLine(statement)
+      point: buildPointLine(statement),
+      messages: []
     };
   }
 
@@ -366,7 +368,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
   const [questionPhase, setQuestionPhase] = useState<QuestionPhase>("stem");
   const [currentStatementIndex, setCurrentStatementIndex] = useState(0);
   const [statementChoice, setStatementChoice] = useState<StatementChoice | null>(null);
-  const [incorrectChatInput, setIncorrectChatInput] = useState("");
+  const [learnerChatInput, setLearnerChatInput] = useState("");
   const [finalChoice, setFinalChoice] = useState<number | null>(null);
   const [finalResult, setFinalResult] = useState<FinalResult | null>(null);
   const [submittedStatementResult, setSubmittedStatementResult] = useState<StatementResult | null>(null);
@@ -675,7 +677,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     setQuestionPhase("stem");
     setCurrentStatementIndex(0);
     setStatementChoice(null);
-    setIncorrectChatInput("");
+    setLearnerChatInput("");
     setFinalChoice(null);
     setFinalResult(null);
     setSubmittedStatementResult(null);
@@ -931,7 +933,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     setQuestionPhase("stem");
     setCurrentStatementIndex(completedStatementCount);
     setStatementChoice(null);
-    setIncorrectChatInput("");
+    setLearnerChatInput("");
     setFinalChoice(null);
   }, [
     currentQuestionId,
@@ -955,7 +957,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     setQuestionPhase((current) => getForwardQuestionPhase(current, nextPhase));
     setCurrentStatementIndex(completedStatementCount);
     setStatementChoice(null);
-    setIncorrectChatInput("");
+    setLearnerChatInput("");
     setFinalChoice(null);
   }, [
     completedStatementCount,
@@ -988,7 +990,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       setQuestionPhase("stem");
       setCurrentStatementIndex(0);
       setStatementChoice(null);
-      setIncorrectChatInput("");
+      setLearnerChatInput("");
       setFinalChoice(null);
       setFinalResult(null);
       setSubmittedStatementResult(null);
@@ -1078,12 +1080,12 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     setSubmittedStatementResult(null);
     setCurrentStatementIndex(completedStatementCount);
     setStatementChoice(null);
-    setIncorrectChatInput("");
+    setLearnerChatInput("");
     setFinalChoice(null);
     setQuestionPhase(getQuestionPhaseFromObservations(learnerCase, currentQuestionObservations));
   }, [completedStatementCount, currentQuestionObservations, learnerCase]);
 
-  const sendIncorrectCoachingMessage = useCallback(async () => {
+  const sendLearnerCoachingMessage = useCallback(async () => {
     const statementForChat = learnerCase.statements[currentStatementIndex] ?? null;
 
     if (
@@ -1091,13 +1093,12 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       !currentQuestionId ||
       !statementForChat ||
       !statementChoice ||
-      !submittedStatementResult ||
-      submittedStatementResult.mode !== "incorrect"
+      !submittedStatementResult
     ) {
       return;
     }
 
-    const learnerMessage = incorrectChatInput.trim();
+    const learnerMessage = learnerChatInput.trim();
     if (!learnerMessage) {
       return;
     }
@@ -1175,20 +1176,23 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
       }
 
       const payload = (await response.json()) as DailySessionPayload;
-      setSubmittedStatementResult((current) =>
-        current && current.mode === "incorrect"
-          ? {
-              ...current,
-              messages: [
-                ...existingMessages,
-                { id: `${Date.now()}-learner`, role: "learner", text: learnerMessage },
-                { id: `${Date.now()}-coach`, role: "coach", text: replyText }
-              ],
-              resolved: false
-            }
-          : current
-      );
-      setIncorrectChatInput("");
+      const messageIdBase = Date.now();
+      setSubmittedStatementResult((current) => {
+        if (!current) {
+          return current;
+        }
+
+        return {
+          ...current,
+          messages: [
+            ...existingMessages,
+            { id: `${messageIdBase}-learner`, role: "learner", text: learnerMessage },
+            { id: `${messageIdBase}-coach`, role: "coach", text: replyText }
+          ],
+          ...(current.mode === "incorrect" ? { resolved: false } : {})
+        };
+      });
+      setLearnerChatInput("");
       reconcileOptimisticObservation(optimisticObservation.id, payload);
     } catch (error) {
       if (optimisticObservation) {
@@ -1205,7 +1209,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     dailySession,
     failOptimisticObservation,
     generateCoachMindForObservation,
-    incorrectChatInput,
+    learnerChatInput,
     learnerCase,
     observations,
     reconcileOptimisticObservation,
@@ -1358,7 +1362,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
     setQuestionPhase("stem");
     setCurrentStatementIndex(0);
     setStatementChoice(null);
-    setIncorrectChatInput("");
+    setLearnerChatInput("");
     setFinalChoice(null);
     setLearnerStepOverride(null);
   }, [applyDailySessionPayload, clearProblemReviewState, queuedNextPayload]);
@@ -1687,8 +1691,36 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                           <p>✓ 正解</p>
                           <p>ポイント</p>
                           <p className="feedback-point-text">{submittedStatementResult.point}</p>
+                          <p>この肢について確認したいことはありますか？</p>
+                          <div className="coaching-chat-list">
+                            {(submittedStatementResult.messages ?? []).map((message) => (
+                              <div className={`coaching-chat-bubble is-${message.role}`} key={message.id}>
+                                <p>{message.text}</p>
+                              </div>
+                            ))}
+                          </div>
+                          <textarea
+                            className="reason-textarea"
+                            onChange={(event) => setLearnerChatInput(event.target.value)}
+                            placeholder="気になった点を入力してください"
+                            rows={3}
+                            value={learnerChatInput}
+                          />
+                          <button
+                            className="secondary-button phone-button"
+                            onClick={() => void sendLearnerCoachingMessage()}
+                            type="button"
+                            disabled={sessionActionStatus !== "idle" || learnerChatInput.trim().length === 0}
+                          >
+                            送る
+                          </button>
                           <div className="feedback-action-stack">
-                            <button className="primary-button phone-button" onClick={proceedAfterStatementResult} type="button">
+                            <button
+                              className="primary-button phone-button"
+                              onClick={proceedAfterStatementResult}
+                              type="button"
+                              disabled={sessionActionStatus !== "idle"}
+                            >
                               {completedStatementCount >= learnerCase.statements.length ? "全体回答へ進む" : "次の肢へ進む"}
                             </button>
                           </div>
@@ -1709,7 +1741,7 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                           <p>今回はここだけ違いました。</p>
                           <p>ポイント</p>
                           <p className="feedback-point-text">{currentStatement ? buildPointLine(currentStatement) : ""}</p>
-                          <p>気になることがあれば聞いてください。</p>
+                          <p>この肢について確認したいことはありますか？</p>
                           <div className="coaching-chat-list">
                             {(submittedStatementResult.messages ?? []).map((message) => (
                               <div className={`coaching-chat-bubble is-${message.role}`} key={message.id}>
@@ -1719,21 +1751,26 @@ export function CoachWorkspace({ initialCase }: CoachWorkspaceProps) {
                           </div>
                           <textarea
                             className="reason-textarea"
-                            onChange={(event) => setIncorrectChatInput(event.target.value)}
+                            onChange={(event) => setLearnerChatInput(event.target.value)}
                             placeholder="気になった点を入力してください"
                             rows={3}
-                            value={incorrectChatInput}
+                            value={learnerChatInput}
                           />
                           <button
                             className="primary-button phone-button"
-                            onClick={() => void sendIncorrectCoachingMessage()}
+                            onClick={() => void sendLearnerCoachingMessage()}
                             type="button"
-                            disabled={sessionActionStatus !== "idle" || incorrectChatInput.trim().length === 0}
+                            disabled={sessionActionStatus !== "idle" || learnerChatInput.trim().length === 0}
                           >
                             送る
                           </button>
                           <div className="feedback-action-stack">
-                            <button className="secondary-button phone-button" onClick={proceedAfterStatementResult} type="button">
+                            <button
+                              className="secondary-button phone-button"
+                              onClick={proceedAfterStatementResult}
+                              type="button"
+                              disabled={sessionActionStatus !== "idle"}
+                            >
                               {completedStatementCount >= learnerCase.statements.length ? "全体回答へ進む" : "次の肢へ進む"}
                             </button>
                           </div>

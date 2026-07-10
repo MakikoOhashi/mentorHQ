@@ -19,7 +19,7 @@ type DailyReviewOutput = Omit<DailyReviewInput, "daily_session_id">;
 
 const LEARNER_CHAT_ABSENCE_RULES = [
   "Do NOT infer learner characteristics from the absence of learner chat.",
-  "Learner chat is only available after incorrect answers.",
+  "Learner chat is optional and may be available after correct or incorrect answers.",
   "Therefore:",
   "- Never compare \"chat vs no chat\".",
   "- Never mention \"chat information was not provided.\"",
@@ -312,7 +312,7 @@ function buildSystemInstruction(): string {
     "key_observations は Observation の写しではなく、Observation から分かる Learning Insight に変換する。",
     "repeated_patterns は明日につながる観点として短く返す。",
     "問題情報や explanation は文脈理解のためだけに使い、説明の要約をそのまま出力しない。",
-    "誤答後チャットがある場合は、理解が動いたポイントだけを要約して反映する。",
+    "learner chat がある場合は、理解が動いたポイントだけを要約して反映する。",
     LEARNER_CHAT_ABSENCE_RULES,
     "Review では、『チャット有無』『質問有無』を比較対象にしない。",
     "Review の比較対象は Observation / reasoning style / misunderstanding / statement judgment / theme understanding のみ。",
@@ -370,15 +370,16 @@ function buildPrompt(params: {
     ).values()
   );
 
-  const wrongAnswerChats = params.observations
+  const learnerChats = params.observations
     .filter(
       (observation) =>
-        observation.correct_or_wrong === "wrong" && /Learner:|Coach:/i.test(observation.note)
+        /Learner:|Coach:/i.test(observation.note)
     )
     .map((observation) => ({
       question_id: observation.question_id,
       question_index: observation.question_index,
       statement_index: observation.statement_index,
+      correct_or_wrong: observation.correct_or_wrong,
       note: observation.note
     }));
 
@@ -419,7 +420,7 @@ AI Coach Team 全体の consensus として返してください。
 - key_observations は Observation を Insight に言い換える
 - 問題情報と explanation は、学びの整理に必要な範囲だけ使う
 - explanation をそのまま要約して出さない
-- 誤答後チャットがある場合は、理解が動いたポイントだけ反映する
+- learner chat がある場合は、理解が動いたポイントだけ反映する
 - ${LEARNER_CHAT_ABSENCE_RULES}
 - 「チャット有無」「質問有無」を比較対象にしない
 - 比較対象は Observation / reasoning style / misunderstanding / statement judgment / theme understanding のみ
@@ -447,8 +448,8 @@ ${JSON.stringify(params.memorySummary ?? null, null, 2)}
 question_context:
 ${JSON.stringify(questionContexts, null, 2)}
 
-wrong_answer_chats:
-${JSON.stringify(wrongAnswerChats, null, 2)}
+learner_chats:
+${JSON.stringify(learnerChats, null, 2)}
 `;
 }
 
