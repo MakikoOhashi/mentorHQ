@@ -16,6 +16,11 @@ MentorHQ は、答えを教える AI ではありません。
 
 Observation を積み重ね、学習者モデルを育てながら、あなたに合った学習へ導く Learning OS です。
 
+## Links
+
+- Demo Video: https://youtu.be/eRULBU8svRM
+- ProtoPedia Article: https://protopedia.net/prototype/8775
+
 ## What It Does
 
 MentorHQ は、管理業務主任者試験の四択問題を題材にした学習体験です。
