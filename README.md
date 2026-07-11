@@ -16,10 +16,17 @@ MentorHQ は、答えを教える AI ではありません。
 
 Observation を積み重ね、学習者モデルを育てながら、あなたに合った学習へ導く Learning OS です。
 
-## Links
+## 🎥 Demo
 
-- Demo Video: https://youtu.be/eRULBU8svRM
-- ProtoPedia Article: https://protopedia.net/prototype/8775
+[![Watch the Demo](https://img.youtube.com/vi/eRULBU8svRM/maxresdefault.jpg)](https://youtu.be/eRULBU8svRM)
+
+## 🌐 Live Demo
+
+https://mentorhq-528335584921.asia-northeast2.run.app/
+
+## ProtoPedia Article
+
+https://protopedia.net/prototype/8775
 
 ## What It Does
 
